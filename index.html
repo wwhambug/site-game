@@ -1,1 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>게임 셀렉터</title>
+<style>
+  :root{
+    --bg:#0f172a;
+    --card:#0b1220;
+    --muted:#9aa4b2;
+    --accent:#60a5fa;
+    --glass: rgba(255,255,255,0.03);
+  }
+  html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+  body{background:linear-gradient(180deg,#071021 0%, #071827 100%);color:#e6eef8;padding:28px;box-sizing:border-box;}
+  .wrap{max-width:1100px;margin:0 auto;}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+  h1{font-size:20px;margin:0}
+  p.note{margin:0;color:var(--muted);font-size:13px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px;margin-top:18px}
+  .tile{
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border-radius:12px;padding:14px;display:flex;flex-direction:column;justify-content:space-between;min-height:110px;
+    box-shadow: 0 6px 18px rgba(2,6,23,0.6), inset 0 1px 0 rgba(255,255,255,0.02);
+    transition:transform .14s ease, box-shadow .14s ease; cursor:pointer; text-decoration:none; color:inherit;
+    border:1px solid rgba(255,255,255,0.03);
+  }
+  .tile:hover{ transform: translateY(-6px); box-shadow: 0 18px 40px rgba(2,6,23,0.65); }
+  .title{font-weight:600;font-size:16px;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sub{font-size:13px;color:var(--muted);margin-bottom:10px}
+  .meta{display:flex;gap:8px;align-items:center;justify-content:space-between}
+  .btn{font-size:13px;padding:8px 10px;border-radius:8px;background:linear-gradient(90deg,var(--accent),#3b82f6);color:#032; font-weight:700;border:none;cursor:pointer}
+  .small{font-size:12px;color:var(--muted)}
+  .placeholder{padding:36px;border-radius:12px;background:var(--card);text-align:center;color:var(--muted)}
+  footer{margin-top:22px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>게임 셀렉터</h1>
+        <p class="note">wwhambug/site-game 리포지토리의 폴더를 자동으로 인식합니다.</p>
+      </div>
+      <div class="small" id="status">로딩 중…</div>
+    </header>
 
+    <main>
+      <div id="grid" class="grid" aria-live="polite"></div>
+      <div id="fallback" style="margin-top:18px"></div>
+    </main>
+
+    <footer>
+      각 게임 폴더에 <code>index.html</code>을 넣으면 카드 클릭 시 바로 실행됩니다.
+    </footer>
+  </div>
+
+<script>
+const USERNAME = "wwhambug";
+const REPO = "site-game";
+
+const grid = document.getElementById('grid');
+const status = document.getElementById('status');
+const fallback = document.getElementById('fallback');
+
+function makeTile(item){
+  const a = document.createElement('a');
+  a.className = 'tile';
+  a.href = item.path.endsWith('/') ? item.path : (item.path + '/');
+  a.target = "_self";
+  a.rel = "noopener";
+
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = item.name;
+
+  const sub = document.createElement('div');
+  sub.className = 'sub';
+  sub.textContent = item.description || '게임 폴더';
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+
+  const small = document.createElement('div');
+  small.className = 'small';
+  small.textContent = item.path;
+
+  const btn = document.createElement('div');
+  btn.className = 'btn';
+  btn.textContent = '실행';
+
+  meta.appendChild(small);
+  meta.appendChild(btn);
+  a.append(title, sub, meta);
+
+  return a;
+}
+
+async function loadFromGitHub(){
+  const apiUrl = `https://api.github.com/repos/${USERNAME}/${REPO}/contents/`;
+  try {
+    const r = await fetch(apiUrl, {headers:{'Accept':'application/vnd.github+json'}});
+    if(!r.ok) throw new Error('GitHub API 요청 실패: ' + r.status);
+    const items = await r.json();
+    const dirs = items.filter(i => i.type === 'dir').map(d => ({
+      name: d.name,
+      path: d.name,
+      description: '폴더 자동 감지됨'
+    }));
+    if(dirs.length === 0) throw new Error('폴더가 없음');
+    status.textContent = `${dirs.length}개 게임 감지됨`;
+    grid.innerHTML = '';
+    dirs.forEach(d => grid.appendChild(makeTile(d)));
+  } catch (err) {
+    console.error(err);
+    status.textContent = '불러오기 실패';
+    fallback.innerHTML = `
+      <div class="placeholder">
+        GitHub API 호출 실패: ${err.message}<br>
+        <br>리포지토리가 공개(public)인지 확인하고,<br>
+        루트에 게임 폴더를 추가해 주세요.
+      </div>`;
+  }
+}
+
+loadFromGitHub();
+</script>
+</body>
+</html>
