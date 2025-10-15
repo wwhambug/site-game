@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>수박 게임</title>
+<style>
+  :root{
+    --bg:#e6fff7;
+    --panel:#ffffff;
+    --accent:#10b981;
+    --muted:#6b7280;
+  }
+  html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;}
+  .wrap{display:flex;align-items:center;justify-content:center;height:100%;background:linear-gradient(180deg,var(--bg),#d8fff0);}
+  .game-card{width:880px;max-width:96vw;background:var(--panel);border-radius:14px;box-shadow:0 10px 30px rgba(2,6,23,0.12);padding:16px;display:grid;grid-template-columns:1fr 250px;gap:12px;}
+  canvas{background:linear-gradient(180deg,#bfffe8,#9fffe0);border-radius:8px;display:block;width:100%;height:600px;touch-action:none;}
+  .panel{padding:12px;}
+  h1{margin:0 0 8px 0;font-size:18px;color:#0f172a;}
+  .stats{display:flex;flex-direction:column;gap:10px;font-size:15px;color:var(--muted);}
+  .big{font-size:28px;font-weight:600;color:#065f46;}
+  button{display:inline-block;padding:10px 14px;border-radius:10px;border:0;background:var(--accent);color:white;font-weight:600;cursor:pointer;}
+  .small{font-size:13px;color:#374151;}
+  .control-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .footer{margin-top:12px;font-size:13px;color:#475569;}
+  .hint{font-size:13px;color:#065f46;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="game-card" role="application" aria-label="수박 잡기 게임">
+    <div>
+      <h1>🍉 수박 잡기</h1>
+      <canvas id="game" width="800" height="600"></canvas>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+        <div class="small">← → 또는 화면 터치/드래그로 이동</div>
+        <div class="small hint">수박을 많이 잡아 최고점수에 도전하세요!</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="stats">
+        <div>점수: <span id="score" class="big">0</span></div>
+        <div>목숨: <span id="lives" class="big">3</span></div>
+        <div>레벨: <span id="level" class="big">1</span></div>
+        <div>최고점: <span id="best" class="big">0</span></div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div class="control-row">
+          <button id="startBtn">시작</button>
+          <button id="pauseBtn">일시정지</button>
+          <button id="resetBtn">리셋</button>
+        </div>
+      </div>
+
+      <div class="footer">
+        <p style="margin:8px 0 0 0">규칙: 떨어지는 수박을 바구니로 받으면 +1점, 놓치면 목숨 -1. 레벨이 오르면 수박 속도가 빨라집니다.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* 수박 게임 — 단일파일 버전
+ - 캔버스 기반 간단한 게임
+ - 엔티티: 플레이어(바구니), 물체(수박)
+ - 키보드, 마우스/터치 입력 지원
+*/
+
+// 캔버스 셋업
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const H = canvas.height;
+
+// UI 요소
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const levelEl = document.getElementById('level');
+const bestEl = document.getElementById('best');
+const startBtn = document.getElementById('startBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const resetBtn = document.getElementById('resetBtn');
+
+let running = false;
+let paused = false;
+let score = 0;
+let lives = 3;
+let level = 1;
+let best = Number(localStorage.getItem('su_bak_best') || 0);
+
+bestEl.textContent = best;
+
+// 플레이어(바구니)
+const player = {
+  w: 140,
+  h: 28,
+  x: (W - 140) / 2,
+  y: H - 40,
+  speed: 8,
+  vx: 0
+};
+
+// 수박(떨어지는 것) 리스트
+let items = [];
+let spawnTimer = 0;
+let spawnInterval = 90; // 프레임 단위 (초기)
+let gravity = 1.4;
+
+// 난이도 조정
+function updateDifficulty() {
+  level = Math.floor(score / 10) + 1;
+  spawnInterval = Math.max(22, 90 - (level - 1) * 6); // 레벨 ↑ => 스폰 빨라짐
+  gravity = 1.4 + (level - 1) * 0.14;
+}
+
+// 아이템 생성
+function spawnItem() {
+  const size = 34 + Math.random() * 22; // 수박 크기
+  const x = Math.random() * (W - size - 20) + 10;
+  const vx = (Math.random() - 0.5) * 1.2; // 약간 왼/오 이동
+  items.push({
+    x, y: -size,
+    size,
+    vy: 0,
+    vx,
+    type: 'watermelon'
+  });
+}
+
+// 충돌 체크 (원과 사각형 대략충돌)
+function checkCollision(item, ply) {
+  // 사각형(플레이어)와 원(수박) 충돌 판정 (원-사각 충돌)
+  const cx = Math.max(ply.x, Math.min(item.x + item.size/2, ply.x + ply.w));
+  const cy = Math.max(ply.y, Math.min(item.y + item.size/2, ply.y + ply.h));
+  const dx = (item.x + item.size/2) - cx;
+  const dy = (item.y + item.size/2) - cy;
+  return (dx*dx + dy*dy) < (item.size/2) * (item.size/2);
+}
+
+// 그리기: 수박 (심플하게 원 + 줄무늬)
+function drawWatermelon(x,y,size) {
+  const r = size/2;
+  // 껍질
+  ctx.beginPath();
+  ctx.ellipse(x + r, y + r, r, r*0.9, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#22c55e';
+  ctx.fill();
+  // 줄무늬
+  ctx.beginPath();
+  ctx.ellipse(x + r, y + r, r*0.95, r*0.85, -0.2, -1.2, 1.2);
+  ctx.strokeStyle = 'rgba(16,185,129,0.7)';
+  ctx.lineWidth = Math.max(2, size/22);
+  ctx.stroke();
+  // 속살 (잘린 느낌 작은 반원)
+  ctx.beginPath();
+  ctx.ellipse(x + r, y + r + size*0.06, r*0.72, r*0.5, 0, Math.PI*1.05, Math.PI*1.95);
+  ctx.fillStyle = '#ff6b6b';
+  ctx.fill();
+  // 씨
+  const seeds = 6;
+  for(let i=0;i<seeds;i++){
+    const ang = Math.PI*1.1 + (i/(seeds-1))*Math.PI*0.8;
+    const sx = x + r + Math.cos(ang) * r*0.45;
+    const sy = y + r + Math.sin(ang) * r*0.25;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, Math.max(1, size*0.03), Math.max(0.8, size*0.02), ang+0.6, 0, Math.PI*2);
+    ctx.fillStyle = '#2b2b2b';
+    ctx.fill();
+  }
+}
+
+// 그리기: 플레이어(바구니)
+function drawPlayer() {
+  // 바구니 그림자
+  ctx.beginPath();
+  ctx.ellipse(player.x + player.w/2, player.y + player.h + 8, player.w*0.48, 6, 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(5,5,5,0.08)';
+  ctx.fill();
+
+  // 바구니 본체
+  ctx.fillStyle = '#3b82f6';
+  roundRect(ctx, player.x, player.y, player.w, player.h, 8, true, false);
+
+  // 패턴
+  ctx.fillStyle = '#60a5fa';
+  for(let i=0;i<4;i++){
+    const bx = player.x + 10 + i*(player.w-20)/4;
+    ctx.fillRect(bx, player.y+6, (player.w-40)/8, player.h-12);
+  }
+}
+
+// 유틸: 둥근 사각형
+function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+  if (r===undefined) r = 5;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  if (fill) ctx.fill();
+  if (stroke) ctx.stroke();
+}
+
+// 업데이트 루프
+let frame = 0;
+function update() {
+  if(!running || paused) return;
+  frame++;
+  // 플레이어 이동
+  player.x += player.vx;
+  if (player.x < 8) player.x = 8;
+  if (player.x + player.w > W - 8) player.x = W - 8 - player.w;
+
+  // 스폰 타이머
+  spawnTimer++;
+  if (spawnTimer >= spawnInterval) {
+    spawnTimer = 0;
+    spawnItem();
+  }
+
+  // 아이템 업데이트
+  for (let i = items.length-1; i>=0; i--) {
+    const it = items[i];
+    it.vy += gravity * 0.06; // 프레임별 가속 (프레임비 보정)
+    it.y += it.vy;
+    it.x += it.vx;
+
+    // 바구니와 충돌?
+    if (checkCollision(it, player)) {
+      score += 1;
+      updateDifficulty();
+      scoreEl.textContent = score;
+      levelEl.textContent = level;
+      // 파티클 효과 대신 작은 튀김(아이템 제거)
+      items.splice(i,1);
+      continue;
+    }
+
+    // 바닥에 닿음 (놓침)
+    if (it.y > H) {
+      items.splice(i,1);
+      lives -= 1;
+      livesEl.textContent = lives;
+      if (lives <= 0) {
+        gameOver();
+        return;
+      }
+    }
+  }
+
+  // 최고점 업데이트
+  if (score > best) {
+    best = score;
+    bestEl.textContent = best;
+    localStorage.setItem('su_bak_best', best);
+  }
+}
+
+// 렌더링
+function render() {
+  // 배경
+  ctx.clearRect(0,0,W,H);
+
+  // 하늘/무늬
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#cffff0');
+  g.addColorStop(1,'#a8fff0');
+  ctx.fillStyle = g;
+  roundRect(ctx, 0, 0, W, H, 12, true, false);
+
+  // 바닥(잔디 느낌)
+  ctx.fillStyle = '#16a34a';
+  ctx.fillRect(0, H-40, W, 40);
+
+  // 아이템 그리기
+  for (const it of items) {
+    drawWatermelon(it.x, it.y, it.size);
+  }
+
+  // 플레이어
+  drawPlayer();
+
+  // HUD (간단)
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = '14px system-ui, -apple-system, "Segoe UI", Roboto';
+  ctx.fillText('Score: ' + score, 12, 22);
+  ctx.fillText('Lives: ' + lives, 12, 40);
+}
+
+// 메인 루프
+function loop() {
+  if (running && !paused) {
+    update();
+    render();
+  } else {
+    // 정지 상태여도 캔버스는 렌더 (정지 화면 표시)
+    render();
+  }
+  requestAnimationFrame(loop);
+}
+
+// 시작 / 일시정지 / 리셋
+function startGame() {
+  if (!running) {
+    running = true;
+    paused = false;
+    score = 0;
+    lives = 3;
+    level = 1;
+    items = [];
+    spawnTimer = 0;
+    player.x = (W - player.w)/2;
+    updateDifficulty();
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    levelEl.textContent = level;
+  } else {
+    paused = false;
+  }
+}
+
+function pauseGame() {
+  if (!running) return;
+  paused = !paused;
+}
+
+function resetGame() {
+  running = false;
+  paused = false;
+  score = 0;
+  lives = 3;
+  level = 1;
+  items = [];
+  spawnTimer = 0;
+  player.x = (W - player.w)/2;
+  scoreEl.textContent = score;
+  livesEl.textContent = lives;
+  levelEl.textContent = level;
+}
+
+// 게임 오버 처리
+function gameOver() {
+  running = false;
+  paused = false;
+  // 간단한 오버 텍스트
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#fff';
+  ctx.font = '48px system-ui, -apple-system, "Segoe UI", Roboto';
+  ctx.textAlign = 'center';
+  ctx.fillText('GAME OVER', W/2, H/2 - 10);
+  ctx.font = '20px system-ui, -apple-system, "Segoe UI", Roboto';
+  ctx.fillText('점수: ' + score + '   최고점: ' + best, W/2, H/2 + 28);
+}
+
+// 입력 처리: 키보드
+const keys = {};
+window.addEventListener('keydown', (e) => {
+  keys[e.key] = true;
+  if (e.key === 'ArrowLeft' || e.key === 'a') player.vx = -player.speed;
+  if (e.key === 'ArrowRight' || e.key === 'd') player.vx = player.speed;
+  if (e.key === ' ' && !running) startGame();
+  if (e.key === 'p') pauseGame();
+});
+window.addEventListener('keyup', (e) => {
+  keys[e.key] = false;
+  if (!keys['ArrowLeft'] && !keys['a'] && (e.key === 'ArrowLeft' || e.key === 'a')) player.vx = 0;
+  if (!keys['ArrowRight'] && !keys['d'] && (e.key === 'ArrowRight' || e.key === 'd')) player.vx = 0;
+});
+
+// 마우스/터치 드래그로 이동
+let dragging = false;
+function pointerMove(clientX) {
+  const rect = canvas.getBoundingClientRect();
+  const x = (clientX - rect.left) * (canvas.width / rect.width);
+  // 플레이어 중심을 포인터에 맞추기
+  player.x = x - player.w/2;
+  if (player.x < 8) player.x = 8;
+  if (player.x + player.w > W - 8) player.x = W - 8 - player.w;
+}
+canvas.addEventListener('mousedown', (e) => {
+  dragging = true;
+  pointerMove(e.clientX);
+});
+window.addEventListener('mousemove', (e) => {
+  if (dragging) pointerMove(e.clientX);
+});
+window.addEventListener('mouseup', () => dragging = false);
+canvas.addEventListener('touchstart', (e) => {
+  dragging = true;
+  pointerMove(e.touches[0].clientX);
+  e.preventDefault();
+});
+canvas.addEventListener('touchmove', (e) => {
+  if (dragging) pointerMove(e.touches[0].clientX);
+  e.preventDefault();
+});
+canvas.addEventListener('touchend', () => { dragging = false; });
+
+// 버튼 바인딩
+startBtn.addEventListener('click', () => startGame());
+pauseBtn.addEventListener('click', () => { pauseGame(); pauseBtn.textContent = paused ? '계속' : '일시정지'; });
+resetBtn.addEventListener('click', () => { resetGame(); pauseBtn.textContent = '일시정지'; });
+
+// 초기 렌더와 루프 시작
+render();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
