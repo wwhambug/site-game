@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>수박 게임 🍉</title>
+  <style>
+    body {
+      margin: 0;
+      background: #fffbe6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      user-select: none;
+      overflow: hidden;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    #gameCanvas {
+      background: #fef9c3;
+      border: 5px solid #facc15;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
+    #ui {
+      position: absolute;
+      top: 20px;
+      display: flex;
+      justify-content: space-between;
+      width: 400px;
+      color: #333;
+      font-weight: bold;
+      font-size: 20px;
+    }
+    #startBtn {
+      position: absolute;
+      padding: 12px 30px;
+      font-size: 20px;
+      background: #facc15;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      top: 50%;
+      transform: translateY(-50%);
+      transition: 0.2s;
+    }
+    #startBtn:hover {
+      background: #fde047;
+    }
+    #gameOver {
+      position: absolute;
+      font-size: 36px;
+      font-weight: bold;
+      color: #dc2626;
+      top: 50%;
+      transform: translateY(-100%);
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>🍎 점수: <span id="score">0</span></div>
+  </div>
+  <canvas id="gameCanvas" width="400" height="600"></canvas>
+  <div id="gameOver">게임 오버!</div>
+  <button id="startBtn">🎮 게임 시작</button>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.getElementById("score");
+    const startBtn = document.getElementById("startBtn");
+    const gameOverText = document.getElementById("gameOver");
+
+    let fruits = [];
+    let droppingFruit = null;
+    let mouseX = canvas.width / 2;
+    let score = 0;
+    let gameRunning = false;
+
+    const fruitData = [
+      { color: "#f87171", radius: 15, name: "체리", score: 5 },
+      { color: "#fb7185", radius: 22, name: "딸기", score: 10 },
+      { color: "#a855f7", radius: 30, name: "포도", score: 20 },
+      { color: "#f87171", radius: 40, name: "사과", score: 30 },
+      { color: "#fde047", radius: 55, name: "레몬", score: 50 },
+      { color: "#4ade80", radius: 75, name: "멜론", score: 100 },
+      { color: "#22c55e", radius: 100, name: "수박", score: 200 }
+    ];
+
+    class Fruit {
+      constructor(x, y, level) {
+        this.x = x;
+        this.y = y;
+        this.level = level;
+        this.r = fruitData[level].radius;
+        this.color = fruitData[level].color;
+        this.dy = 0;
+        this.dx = 0;
+      }
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      update() {
+        this.dy += 0.4; // gravity
+        this.x += this.dx;
+        this.y += this.dy;
+
+        // ground
+        if (this.y + this.r > canvas.height) {
+          this.y = canvas.height - this.r;
+          this.dy *= -0.5;
+        }
+        // wall bounce
+        if (this.x - this.r < 0 || this.x + this.r > canvas.width) {
+          this.dx *= -0.5;
+          this.x = Math.max(this.r, Math.min(canvas.width - this.r, this.x));
+        }
+      }
+    }
+
+    function spawnFruit() {
+      droppingFruit = new Fruit(mouseX, 50, 0);
+    }
+
+    function resetGame() {
+      fruits = [];
+      droppingFruit = null;
+      score = 0;
+      scoreEl.textContent = "0";
+      gameOverText.style.display = "none";
+      startBtn.style.display = "none";
+      gameRunning = true;
+      spawnFruit();
+      loop();
+    }
+
+    canvas.addEventListener("mousemove", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      mouseX = e.clientX - rect.left;
+      if (droppingFruit) droppingFruit.x = mouseX;
+    });
+
+    canvas.addEventListener("touchmove", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      mouseX = e.touches[0].clientX - rect.left;
+      if (droppingFruit) droppingFruit.x = mouseX;
+    });
+
+    canvas.addEventListener("click", dropFruit);
+    canvas.addEventListener("touchend", dropFruit);
+
+    function dropFruit() {
+      if (!gameRunning) return;
+      if (droppingFruit) {
+        fruits.push(droppingFruit);
+        droppingFruit = null;
+        setTimeout(spawnFruit, 600);
+      }
+    }
+
+    function checkCollision(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.hypot(dx, dy);
+      return dist < a.r + b.r;
+    }
+
+    function handleFruitCollision() {
+      // physics collision
+      for (let i = 0; i < fruits.length; i++) {
+        for (let j = i + 1; j < fruits.length; j++) {
+          const a = fruits[i];
+          const b = fruits[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < a.r + b.r) {
+            const overlap = (a.r + b.r - dist) / 2;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            a.x += nx * overlap;
+            a.y += ny * overlap;
+            b.x -= nx * overlap;
+            b.y -= ny * overlap;
+            a.dx += nx * 0.3;
+            b.dx -= nx * 0.3;
+            a.dy += ny * 0.3;
+            b.dy -= ny * 0.3;
+          }
+        }
+      }
+
+      // merging
+      for (let i = 0; i < fruits.length; i++) {
+        for (let j = i + 1; j < fruits.length; j++) {
+          const a = fruits[i];
+          const b = fruits[j];
+          if (a.level === b.level && checkCollision(a, b)) {
+            const nx = (a.x + b.x) / 2;
+            const ny = (a.y + b.y) / 2;
+            const nextLevel = a.level + 1;
+            if (nextLevel < fruitData.length) {
+              fruits.splice(j, 1);
+              fruits.splice(i, 1);
+              fruits.push(new Fruit(nx, ny, nextLevel));
+              score += fruitData[nextLevel].score;
+              scoreEl.textContent = score;
+            } else {
+              fruits.splice(j, 1);
+              fruits.splice(i, 1);
+              score += 500;
+              scoreEl.textContent = score;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    function checkGameOver() {
+      for (let f of fruits) {
+        if (f.y - f.r < 0) {
+          gameOver();
+          break;
+        }
+      }
+    }
+
+    function gameOver() {
+      gameRunning = false;
+      gameOverText.style.display = "block";
+      startBtn.style.display = "block";
+    }
+
+    function loop() {
+      if (!gameRunning) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (let f of fruits) {
+        f.update();
+        f.draw();
+      }
+
+      handleFruitCollision();
+      checkGameOver();
+
+      if (droppingFruit) droppingFruit.draw();
+      requestAnimationFrame(loop);
+    }
+
+    startBtn.addEventListener("click", resetGame);
+  </script>
+</body>
+</html>
