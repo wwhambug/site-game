@@ -1,196 +1,160 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>레몬 슬라이스 게임 🍋</title>
-<style>
-  html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui;}
-  #gameWrap{height:100vh;display:flex;align-items:center;justify-content:center;
-    background:linear-gradient(180deg,#fff9d1 0%,#fef6b8 60%);overflow:hidden}
-  canvas{background:transparent;border-radius:12px;box-shadow:0 10px 30px rgba(20,30,50,0.15)}
-  .ui{position:absolute;left:20px;top:20px;color:#663;display:flex;gap:12px;align-items:center;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,0.6)}
-  .ui .btn{background:rgba(255,255,255,0.9);padding:8px 12px;border-radius:10px;border:1px solid rgba(0,0,0,0.06);cursor:pointer}
-  .centerHUD{position:absolute;left:50%;transform:translateX(-50%);top:18px;color:#664e00;font-weight:700;text-shadow:0 1px 0 #fff}
-  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-  .panel{pointer-events:auto;background:rgba(255,255,255,0.98);padding:18px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.12);text-align:center}
-  .panel h1{margin:0 0 8px;font-size:18px}
-  .panel p{margin:6px 0;color:#444;font-size:14px}
-  .small{font-size:12px;color:#666;margin-top:8px}
-  .hidden{display:none}
-  footer{position:absolute;right:16px;bottom:12px;font-size:12px;color:#775}
-</style>
+  <meta charset="UTF-8">
+  <title>레몬 게임 🍋</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #fef9c3;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: sans-serif;
+      user-select: none;
+    }
+    canvas {
+      background: #fff3b0;
+      border: 5px solid #facc15;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
+    #startBtn {
+      position: absolute;
+      padding: 12px 28px;
+      font-size: 20px;
+      background: #facc15;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    #startBtn:hover {
+      background: #fde047;
+    }
+  </style>
 </head>
 <body>
-<div id="gameWrap">
-  <canvas id="c" width="900" height="600"></canvas>
+  <button id="startBtn">🍋 게임 시작</button>
+  <canvas id="gameCanvas" width="400" height="600"></canvas>
 
-  <div class="ui">
-    <div class="btn" id="pauseBtn">일시정지</div>
-    <div class="btn" id="restartBtn">다시시작</div>
-  </div>
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const startBtn = document.getElementById("startBtn");
 
-  <div class="centerHUD" id="scoreHUD">점수: 0 · 최고: 0 · 목숨: 3</div>
+    let gameRunning = false;
+    let lemons = [];
+    let droppingLemon = null;
+    let mouseX = canvas.width / 2;
 
-  <div id="overlay">
-    <div class="panel" id="startPanel">
-      <h1>🍋 레몬 슬라이스</h1>
-      <p>마우스나 손가락으로 레몬을 베세요.<br>놓치면 목숨이 줄어듭니다!</p>
-      <button class="btn" id="startBtn">시작하기</button>
-    </div>
+    const lemonImages = [
+      { color: "#fde047", radius: 15 },
+      { color: "#facc15", radius: 25 },
+      { color: "#eab308", radius: 40 },
+      { color: "#ca8a04", radius: 60 }
+    ];
 
-    <div class="panel hidden" id="gameOverPanel">
-      <h1>게임 오버</h1>
-      <p id="finalScore">점수: 0</p>
-      <button class="btn" id="playAgainBtn">다시 플레이</button>
-    </div>
-  </div>
-
-  <footer>만든이: ChatGPT — 레몬 버전 🍋</footer>
-</div>
-
-<script>
-// ===== 기본 설정 =====
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
-
-let fruits=[], particles=[];
-let score=0, lives=3, high=Number(localStorage.getItem('lemon_high')||0);
-let running=false, paused=false, tick=0, spawnT=0;
-const gravity=0.25;
-
-// ===== 유틸 =====
-function rand(a,b){return Math.random()*(b-a)+a;}
-function segCircle(x1,y1,x2,y2,cx,cy,r){
-  const vx=x2-x1,vy=y2-y1,wx=cx-x1,wy=cy-y1,c1=vx*wx+vy*wy;
-  if(c1<=0)return(wx*wx+wy*wy)<=r*r;
-  const c2=vx*vx+vy*vy;
-  if(c2<=c1){const dx=cx-x2,dy=cy-y2;return dx*dx+dy*dy<=r*r;}
-  const b=c1/c2,pbx=x1+b*vx,pby=y1+b*vy,dx=cx-pbx,dy=cy-pby;
-  return dx*dx+dy*dy<=r*r;
-}
-function spawnFruit(){
-  const r=rand(22,45);
-  const f={
-    x:rand(r,W-r),y:H+r+20,vx:rand(-2,2),vy:rand(-9,-6),
-    r,angle:rand(0,6.28),rot:rand(-0.08,0.08),sliced:false,
-    score:Math.round(10+(50*(46-r)/22))
-  };
-  fruits.push(f);
-}
-function spawnParticles(x,y,col,n){
-  for(let i=0;i<n;i++)
-    particles.push({x,y,vx:rand(-3,3),vy:rand(-5,2),life:rand(30,60),age:0,size:rand(2,5),color:col});
-}
-
-// ===== 포인터 슬라이스 =====
-let pointer={down:false,pts:[]};
-function pDown(x,y){pointer.down=true;pointer.pts=[{x,y}];}
-function pMove(x,y){
-  if(!pointer.down)return;
-  const pts=pointer.pts;
-  if(pts.length<1||Math.hypot(x-pts.at(-1).x,y-pts.at(-1).y)>4)pts.push({x,y});
-  if(pts.length>=2){
-    const p1=pts[pts.length-2],p2=pts[pts.length-1];
-    for(const f of fruits){
-      if(!f.sliced&&segCircle(p1.x,p1.y,p2.x,p2.y,f.x,f.y,f.r)){
-        f.sliced=true;score+=f.score;
-        spawnParticles(f.x,f.y,'#ffe66d',20);
-        spawnParticles(f.x,f.y,'#fff',8);
-        if(score>high){high=score;localStorage.setItem('lemon_high',high);}
+    class Lemon {
+      constructor(x, y, level) {
+        this.x = x;
+        this.y = y;
+        this.level = level;
+        this.r = lemonImages[level].radius;
+        this.color = lemonImages[level].color;
+        this.dy = 0;
+      }
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.strokeStyle = "#fcd34d";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      update() {
+        this.dy += 0.4;
+        this.y += this.dy;
+        if (this.y + this.r > canvas.height) {
+          this.y = canvas.height - this.r;
+          this.dy *= -0.5;
+        }
       }
     }
-  }
-}
-function pUp(){pointer.down=false;pointer.pts=[];}
-const getPos=e=>{
-  const r=canvas.getBoundingClientRect();
-  const t=e.touches?e.touches[0]:e;
-  return{x:(t.clientX-r.left)*(W/r.width),y:(t.clientY-r.top)*(H/r.height)};
-};
-canvas.addEventListener('mousedown',e=>{const p=getPos(e);pDown(p.x,p.y);});
-canvas.addEventListener('mousemove',e=>{const p=getPos(e);pMove(p.x,p.y);});
-window.addEventListener('mouseup',pUp);
-canvas.addEventListener('touchstart',e=>{e.preventDefault();const p=getPos(e);pDown(p.x,p.y);});
-canvas.addEventListener('touchmove',e=>{e.preventDefault();const p=getPos(e);pMove(p.x,p.y);});
-window.addEventListener('touchend',pUp);
 
-// ===== 루프 =====
-function step(){
-  if(!running||paused){requestAnimationFrame(step);return;}
-  tick++;
-  if(spawnT--<=0){spawnT=Math.max(18,70-Math.floor(score/40));spawnFruit();}
-  // 과일
-  for(let i=fruits.length-1;i>=0;i--){
-    const f=fruits[i];
-    f.vy+=gravity;f.x+=f.vx;f.y+=f.vy;f.angle+=f.rot;
-    if(f.y-f.r>H+30&&!f.sliced){fruits.splice(i,1);lives--;if(lives<=0)end();}
-    if(f.sliced&&f.y>H+60)fruits.splice(i,1);
-  }
-  // 파티클
-  for(let i=particles.length-1;i>=0;i--){
-    const p=particles[i];
-    p.vy+=0.12;p.x+=p.vx;p.y+=p.vy;p.age++;
-    if(p.age>p.life)particles.splice(i,1);
-  }
-  draw();
-  requestAnimationFrame(step);
-}
-
-// ===== 그리기 =====
-function draw(){
-  ctx.clearRect(0,0,W,H);
-  // 레몬
-  for(const f of fruits){
-    ctx.save();ctx.translate(f.x,f.y);ctx.rotate(f.angle);
-    // 외피
-    ctx.beginPath();ctx.arc(0,0,f.r,0,6.28);
-    ctx.fillStyle='#fce12d';ctx.fill();
-    // 속살
-    ctx.beginPath();ctx.arc(0,0,f.r*0.82,0,6.28);
-    ctx.fillStyle='#fff17a';ctx.fill();
-    // 조각무늬
-    ctx.strokeStyle='#fff59d';ctx.lineWidth=2;
-    for(let i=0;i<8;i++){
-      ctx.beginPath();
-      ctx.moveTo(0,0);
-      ctx.lineTo(Math.cos(i*0.785)*f.r*0.8,Math.sin(i*0.785)*f.r*0.8);
-      ctx.stroke();
+    function resetGame() {
+      lemons = [];
+      droppingLemon = null;
+      gameRunning = true;
+      startBtn.style.display = "none";
+      spawnNewLemon();
+      requestAnimationFrame(loop);
     }
-    ctx.restore();
-  }
-  // 파티클
-  for(const p of particles){
-    ctx.globalAlpha=1-p.age/p.life;
-    ctx.fillStyle=p.color;
-    ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,6.28);ctx.fill();
-  }
-  ctx.globalAlpha=1;
-  // 슬라이스 궤적
-  if(pointer.pts.length>1){
-    const pts=pointer.pts.slice(-10);
-    ctx.lineJoin=ctx.lineCap='round';
-    ctx.lineWidth=14;ctx.strokeStyle='rgba(255,255,255,0.8)';
-    ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
-    for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);
-    ctx.stroke();
-    ctx.lineWidth=8;ctx.strokeStyle='rgba(255,230,0,0.9)';
-    ctx.stroke();
-  }
-  document.getElementById('scoreHUD').textContent=`점수: ${score} · 최고: ${high} · 목숨: ${lives}`;
-}
 
-// ===== 상태 제어 =====
-function start(){score=0;lives=3;fruits=[];particles=[];running=true;paused=false;spawnT=10;document.getElementById('startPanel').classList.add('hidden');document.getElementById('gameOverPanel').classList.add('hidden');requestAnimationFrame(step);}
-function end(){running=false;document.getElementById('finalScore').textContent=`점수: ${score}`;document.getElementById('gameOverPanel').classList.remove('hidden');}
+    function spawnNewLemon() {
+      droppingLemon = new Lemon(mouseX, 50, 0);
+    }
 
-// ===== 버튼 =====
-startBtn.onclick=()=>start();
-playAgainBtn.onclick=()=>start();
-pauseBtn.onclick=()=>{if(!running)return;paused=!paused;pauseBtn.textContent=paused?'계속':'일시정지';if(!paused)requestAnimationFrame(step);};
-restartBtn.onclick=()=>start();
-window.addEventListener('keydown',e=>{if(e.code==='Space'&&running){paused=!paused;pauseBtn.textContent=paused?'계속':'일시정지';if(!paused)requestAnimationFrame(step);}});
-</script>
+    canvas.addEventListener("mousemove", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      mouseX = e.clientX - rect.left;
+      if (droppingLemon) droppingLemon.x = mouseX;
+    });
+
+    canvas.addEventListener("click", () => {
+      if (!gameRunning) return;
+      if (droppingLemon) {
+        lemons.push(droppingLemon);
+        droppingLemon = null;
+        setTimeout(spawnNewLemon, 500);
+      }
+    });
+
+    function checkCollision(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.hypot(dx, dy);
+      return dist < a.r + b.r;
+    }
+
+    function loop() {
+      if (!gameRunning) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (let l of lemons) {
+        l.update();
+        l.draw();
+      }
+
+      // 병합 처리
+      for (let i = 0; i < lemons.length; i++) {
+        for (let j = i + 1; j < lemons.length; j++) {
+          let a = lemons[i];
+          let b = lemons[j];
+          if (a.level === b.level && checkCollision(a, b)) {
+            const nx = (a.x + b.x) / 2;
+            const ny = (a.y + b.y) / 2;
+            lemons.splice(j, 1);
+            lemons.splice(i, 1);
+            if (a.level < lemonImages.length - 1) {
+              lemons.push(new Lemon(nx, ny, a.level + 1));
+            }
+            break;
+          }
+        }
+      }
+
+      if (droppingLemon) {
+        droppingLemon.draw();
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    startBtn.addEventListener("click", resetGame);
+  </script>
 </body>
 </html>
