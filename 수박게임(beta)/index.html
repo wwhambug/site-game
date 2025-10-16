@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>수박 게임 🍉</title>
   <style>
     body {
@@ -80,8 +80,8 @@
     let gameRunning = false;
 
     const fruitData = [
-      { color: "#f87171", radius: 15, name: "체리", score: 5 },
-      { color: "#fb7185", radius: 22, name: "딸기", score: 10 },
+      { color: "#f87171", radius: 10, name: "체리", score: 5 },
+      { color: "#fb7185", radius: 20, name: "딸기", score: 10 },
       { color: "#a855f7", radius: 30, name: "포도", score: 20 },
       { color: "#f87171", radius: 40, name: "사과", score: 30 },
       { color: "#fde047", radius: 55, name: "레몬", score: 50 },
@@ -98,6 +98,7 @@
         this.color = fruitData[level].color;
         this.dy = 0;
         this.dx = 0;
+        this.mass = this.r / 10; // 크기에 비례한 질량
       }
       draw() {
         ctx.beginPath();
@@ -107,27 +108,42 @@
         ctx.strokeStyle = "#fff";
         ctx.lineWidth = 2;
         ctx.stroke();
+
+        // 번호 표시
+        ctx.fillStyle = "rgba(0,0,0,0.6)";
+        ctx.font = `${this.r / 1.5}px bold sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(this.level + 1, this.x, this.y);
       }
       update() {
-        this.dy += 0.4; // gravity
+        // 크기별 중력 차등 적용
+        const gravity = 0.25 + this.mass * 0.05;
+        this.dy += gravity;
         this.x += this.dx;
         this.y += this.dy;
 
-        // ground
+        // 바닥 충돌
         if (this.y + this.r > canvas.height) {
           this.y = canvas.height - this.r;
-          this.dy *= -0.5;
+          this.dy *= -0.4;
+          this.dx *= 0.9;
         }
-        // wall bounce
-        if (this.x - this.r < 0 || this.x + this.r > canvas.width) {
-          this.dx *= -0.5;
-          this.x = Math.max(this.r, Math.min(canvas.width - this.r, this.x));
+
+        // 좌우 벽 충돌
+        if (this.x - this.r < 0) {
+          this.x = this.r;
+          this.dx *= -0.7;
+        }
+        if (this.x + this.r > canvas.width) {
+          this.x = canvas.width - this.r;
+          this.dx *= -0.7;
         }
       }
     }
 
     function spawnFruit() {
-      droppingFruit = new Fruit(mouseX, 50, 0);
+      droppingFruit = new Fruit(mouseX, 50, Math.floor(Math.random() * 3)); // 1~3단계까지 랜덤
     }
 
     function resetGame() {
@@ -162,7 +178,7 @@
       if (droppingFruit) {
         fruits.push(droppingFruit);
         droppingFruit = null;
-        setTimeout(spawnFruit, 600);
+        setTimeout(spawnFruit, 800);
       }
     }
 
@@ -173,32 +189,45 @@
       return dist < a.r + b.r;
     }
 
-    function handleFruitCollision() {
-      // physics collision
-      for (let i = 0; i < fruits.length; i++) {
-        for (let j = i + 1; j < fruits.length; j++) {
-          const a = fruits[i];
-          const b = fruits[j];
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist < a.r + b.r) {
-            const overlap = (a.r + b.r - dist) / 2;
-            const nx = dx / dist;
-            const ny = dy / dist;
-            a.x += nx * overlap;
-            a.y += ny * overlap;
-            b.x -= nx * overlap;
-            b.y -= ny * overlap;
-            a.dx += nx * 0.3;
-            b.dx -= nx * 0.3;
-            a.dy += ny * 0.3;
-            b.dy -= ny * 0.3;
+    function handlePhysics() {
+      // 반복적으로 충돌 계산 (뚫림 방지)
+      for (let step = 0; step < 3; step++) {
+        for (let i = 0; i < fruits.length; i++) {
+          for (let j = i + 1; j < fruits.length; j++) {
+            const a = fruits[i];
+            const b = fruits[j];
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const dist = Math.hypot(dx, dy);
+            const minDist = a.r + b.r;
+
+            if (dist < minDist) {
+              const overlap = (minDist - dist) / 2;
+              const nx = dx / dist;
+              const ny = dy / dist;
+
+              a.x += nx * overlap;
+              a.y += ny * overlap;
+              b.x -= nx * overlap;
+              b.y -= ny * overlap;
+
+              // 속도 반영 (충돌 반응)
+              const relativeVelocityX = b.dx - a.dx;
+              const relativeVelocityY = b.dy - a.dy;
+              const impactSpeed = relativeVelocityX * nx + relativeVelocityY * ny;
+              if (impactSpeed < 0) continue;
+              const impulse = (2 * impactSpeed) / (a.mass + b.mass);
+              a.dx += impulse * b.mass * nx * 0.2;
+              a.dy += impulse * b.mass * ny * 0.2;
+              b.dx -= impulse * a.mass * nx * 0.2;
+              b.dy -= impulse * a.mass * ny * 0.2;
+            }
           }
         }
       }
+    }
 
-      // merging
+    function mergeFruits() {
       for (let i = 0; i < fruits.length; i++) {
         for (let j = i + 1; j < fruits.length; j++) {
           const a = fruits[i];
@@ -210,7 +239,9 @@
             if (nextLevel < fruitData.length) {
               fruits.splice(j, 1);
               fruits.splice(i, 1);
-              fruits.push(new Fruit(nx, ny, nextLevel));
+              const merged = new Fruit(nx, ny, nextLevel);
+              merged.dy = -5;
+              fruits.push(merged);
               score += fruitData[nextLevel].score;
               scoreEl.textContent = score;
             } else {
@@ -219,7 +250,7 @@
               score += 500;
               scoreEl.textContent = score;
             }
-            break;
+            return; // 한 번만 합성 후 빠져나가기
           }
         }
       }
@@ -246,13 +277,15 @@
 
       for (let f of fruits) {
         f.update();
-        f.draw();
       }
 
-      handleFruitCollision();
+      handlePhysics();
+      mergeFruits();
       checkGameOver();
 
+      for (let f of fruits) f.draw();
       if (droppingFruit) droppingFruit.draw();
+
       requestAnimationFrame(loop);
     }
 
