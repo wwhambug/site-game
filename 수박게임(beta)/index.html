@@ -1,185 +1,160 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>수박 게임 🍉</title>
   <style>
     body {
       margin: 0;
+      overflow: hidden;
       background: #fffbe6;
       display: flex;
-      flex-direction: column;
-      align-items: center;
       justify-content: center;
+      align-items: center;
       height: 100vh;
+      font-family: sans-serif;
       user-select: none;
-      overflow: hidden;
-      font-family: 'Segoe UI', sans-serif;
     }
-    #gameCanvas {
-      background: #fef9c3;
-      border: 5px solid #facc15;
-      border-radius: 12px;
+    canvas {
+      background: #fef3c7;
+      border: 5px solid #fcd34d;
+      border-radius: 10px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-    }
-    #ui {
-      position: absolute;
-      top: 20px;
-      display: flex;
-      justify-content: space-between;
-      width: 400px;
-      color: #333;
-      font-weight: bold;
-      font-size: 20px;
     }
     #startBtn {
       position: absolute;
-      padding: 12px 30px;
+      padding: 10px 28px;
       font-size: 20px;
-      background: #facc15;
+      background: #fcd34d;
       border: none;
-      border-radius: 10px;
+      border-radius: 8px;
       cursor: pointer;
-      top: 50%;
-      transform: translateY(-50%);
       transition: 0.2s;
     }
-    #startBtn:hover {
-      background: #fde047;
-    }
-    #gameOver {
+    #startBtn:hover { background: #fde047; }
+    #scoreboard {
       position: absolute;
-      font-size: 36px;
-      font-weight: bold;
-      color: #dc2626;
-      top: 50%;
-      transform: translateY(-100%);
-      display: none;
+      top: 10px;
+      left: 10px;
+      font-size: 18px;
+      background: rgba(255,255,255,0.6);
+      padding: 8px 12px;
+      border-radius: 6px;
     }
   </style>
 </head>
 <body>
-  <div id="ui">
-    <div>🍎 점수: <span id="score">0</span></div>
-  </div>
+  <button id="startBtn">🍉 게임 시작</button>
+  <div id="scoreboard">점수: 0<br>최고점수: 0</div>
   <canvas id="gameCanvas" width="400" height="600"></canvas>
-  <div id="gameOver">게임 오버!</div>
-  <button id="startBtn">🎮 게임 시작</button>
 
   <script>
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
-    const scoreEl = document.getElementById("score");
     const startBtn = document.getElementById("startBtn");
-    const gameOverText = document.getElementById("gameOver");
+    const scoreboard = document.getElementById("scoreboard");
 
+    let gameRunning = false;
     let fruits = [];
-    let droppingFruit = null;
+    let dropping = null;
     let mouseX = canvas.width / 2;
     let score = 0;
-    let gameRunning = false;
+    let highScore = parseInt(localStorage.getItem("highScore") || "0");
 
-    const fruitData = [
-      { color: "#f87171", radius: 10, name: "체리", score: 5 },
-      { color: "#fb7185", radius: 20, name: "딸기", score: 10 },
-      { color: "#a855f7", radius: 30, name: "포도", score: 20 },
-      { color: "#f87171", radius: 40, name: "사과", score: 30 },
-      { color: "#fde047", radius: 55, name: "레몬", score: 50 },
-      { color: "#4ade80", radius: 75, name: "멜론", score: 100 },
-      { color: "#22c55e", radius: 100, name: "수박", score: 200 }
+    // 과일 정의 (작을수록 가볍고, 클수록 무거움)
+    const fruitTypes = [
+      { name: "체리", color: "#ff4d6d", r: 12, gravity: 0.25, score: 1 },
+      { name: "딸기", color: "#ff6384", r: 18, gravity: 0.3, score: 2 },
+      { name: "포도", color: "#a855f7", r: 26, gravity: 0.35, score: 4 },
+      { name: "사과", color: "#ef4444", r: 35, gravity: 0.4, score: 8 },
+      { name: "레몬", color: "#fde047", r: 45, gravity: 0.45, score: 16 },
+      { name: "멜론", color: "#86efac", r: 55, gravity: 0.5, score: 32 },
+      { name: "수박", color: "#16a34a", r: 65, gravity: 0.55, score: 64 },
+      { name: "파인", color: "#facc15", r: 75, gravity: 0.6, score: 100 },
+      { name: "복숭아", color: "#fb7185", r: 85, gravity: 0.65, score: 200 },
+      { name: "망고", color: "#fbbf24", r: 95, gravity: 0.7, score: 400 },
+      { name: "용과", color: "#ec4899", r: 110, gravity: 0.75, score: 800 },
+      { name: "두리안", color: "#84cc16", r: 130, gravity: 0.8, score: 1600 }
     ];
 
     class Fruit {
-      constructor(x, y, level) {
+      constructor(x, y, type) {
         this.x = x;
         this.y = y;
-        this.level = level;
-        this.r = fruitData[level].radius;
-        this.color = fruitData[level].color;
+        this.type = type;
+        this.r = type.r;
         this.dy = 0;
-        this.dx = 0;
-        this.mass = this.r / 10; // 크기에 비례한 질량
       }
       draw() {
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
+        ctx.fillStyle = this.type.color;
         ctx.fill();
         ctx.strokeStyle = "#fff";
         ctx.lineWidth = 2;
         ctx.stroke();
-
-        // 번호 표시
-        ctx.fillStyle = "rgba(0,0,0,0.6)";
-        ctx.font = `${this.r / 1.5}px bold sans-serif`;
+        ctx.fillStyle = "#000";
+        ctx.font = "bold 14px sans-serif";
         ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(this.level + 1, this.x, this.y);
+        ctx.fillText(fruitTypes.indexOf(this.type) + 1, this.x, this.y + 5);
       }
       update() {
-        // 크기별 중력 차등 적용
-        const gravity = 0.25 + this.mass * 0.05;
-        this.dy += gravity;
-        this.x += this.dx;
+        this.dy += this.type.gravity;
         this.y += this.dy;
 
         // 바닥 충돌
         if (this.y + this.r > canvas.height) {
           this.y = canvas.height - this.r;
-          this.dy *= -0.4;
-          this.dx *= 0.9;
+          this.dy *= -0.3;
         }
 
-        // 좌우 벽 충돌
+        // 옆벽 충돌
         if (this.x - this.r < 0) {
           this.x = this.r;
-          this.dx *= -0.7;
+          this.dy *= 0.9;
         }
         if (this.x + this.r > canvas.width) {
           this.x = canvas.width - this.r;
-          this.dx *= -0.7;
+          this.dy *= 0.9;
         }
       }
     }
 
-    function spawnFruit() {
-      droppingFruit = new Fruit(mouseX, 50, Math.floor(Math.random() * 3)); // 1~3단계까지 랜덤
+    function spawnNewFruit() {
+      const rand = Math.random() < 0.9 ? 0 : 1; // 대부분 체리, 가끔 딸기
+      dropping = new Fruit(mouseX, 40, fruitTypes[rand]);
     }
+
+    canvas.addEventListener("mousemove", e => {
+      const rect = canvas.getBoundingClientRect();
+      mouseX = e.clientX - rect.left;
+      if (dropping) dropping.x = mouseX;
+    });
+
+    canvas.addEventListener("click", () => {
+      if (!gameRunning || !dropping) return;
+      fruits.push(dropping);
+      dropping = null;
+      setTimeout(spawnNewFruit, 500);
+    });
 
     function resetGame() {
       fruits = [];
-      droppingFruit = null;
+      dropping = null;
       score = 0;
-      scoreEl.textContent = "0";
-      gameOverText.style.display = "none";
-      startBtn.style.display = "none";
       gameRunning = true;
-      spawnFruit();
-      loop();
+      startBtn.style.display = "none";
+      spawnNewFruit();
+      requestAnimationFrame(loop);
     }
 
-    canvas.addEventListener("mousemove", (e) => {
-      const rect = canvas.getBoundingClientRect();
-      mouseX = e.clientX - rect.left;
-      if (droppingFruit) droppingFruit.x = mouseX;
-    });
-
-    canvas.addEventListener("touchmove", (e) => {
-      const rect = canvas.getBoundingClientRect();
-      mouseX = e.touches[0].clientX - rect.left;
-      if (droppingFruit) droppingFruit.x = mouseX;
-    });
-
-    canvas.addEventListener("click", dropFruit);
-    canvas.addEventListener("touchend", dropFruit);
-
-    function dropFruit() {
-      if (!gameRunning) return;
-      if (droppingFruit) {
-        fruits.push(droppingFruit);
-        droppingFruit = null;
-        setTimeout(spawnFruit, 800);
+    function updateScore(points) {
+      score += points;
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem("highScore", highScore);
       }
+      scoreboard.innerHTML = `점수: ${score}<br>최고점수: ${highScore}`;
     }
 
     function checkCollision(a, b) {
@@ -189,86 +164,24 @@
       return dist < a.r + b.r;
     }
 
-    function handlePhysics() {
-      // 반복적으로 충돌 계산 (뚫림 방지)
-      for (let step = 0; step < 3; step++) {
-        for (let i = 0; i < fruits.length; i++) {
-          for (let j = i + 1; j < fruits.length; j++) {
-            const a = fruits[i];
-            const b = fruits[j];
-            const dx = a.x - b.x;
-            const dy = a.y - b.y;
-            const dist = Math.hypot(dx, dy);
-            const minDist = a.r + b.r;
-
-            if (dist < minDist) {
-              const overlap = (minDist - dist) / 2;
-              const nx = dx / dist;
-              const ny = dy / dist;
-
-              a.x += nx * overlap;
-              a.y += ny * overlap;
-              b.x -= nx * overlap;
-              b.y -= ny * overlap;
-
-              // 속도 반영 (충돌 반응)
-              const relativeVelocityX = b.dx - a.dx;
-              const relativeVelocityY = b.dy - a.dy;
-              const impactSpeed = relativeVelocityX * nx + relativeVelocityY * ny;
-              if (impactSpeed < 0) continue;
-              const impulse = (2 * impactSpeed) / (a.mass + b.mass);
-              a.dx += impulse * b.mass * nx * 0.2;
-              a.dy += impulse * b.mass * ny * 0.2;
-              b.dx -= impulse * a.mass * nx * 0.2;
-              b.dy -= impulse * a.mass * ny * 0.2;
-            }
-          }
-        }
-      }
-    }
-
     function mergeFruits() {
       for (let i = 0; i < fruits.length; i++) {
         for (let j = i + 1; j < fruits.length; j++) {
-          const a = fruits[i];
-          const b = fruits[j];
-          if (a.level === b.level && checkCollision(a, b)) {
-            const nx = (a.x + b.x) / 2;
-            const ny = (a.y + b.y) / 2;
-            const nextLevel = a.level + 1;
-            if (nextLevel < fruitData.length) {
+          const a = fruits[i], b = fruits[j];
+          if (a.type === b.type && checkCollision(a, b)) {
+            const idx = fruitTypes.indexOf(a.type);
+            if (idx < fruitTypes.length - 1) {
+              const nx = (a.x + b.x) / 2;
+              const ny = (a.y + b.y) / 2;
               fruits.splice(j, 1);
               fruits.splice(i, 1);
-              const merged = new Fruit(nx, ny, nextLevel);
-              merged.dy = -5;
-              fruits.push(merged);
-              score += fruitData[nextLevel].score;
-              scoreEl.textContent = score;
-            } else {
-              fruits.splice(j, 1);
-              fruits.splice(i, 1);
-              score += 500;
-              scoreEl.textContent = score;
+              fruits.push(new Fruit(nx, ny, fruitTypes[idx + 1]));
+              updateScore(a.type.score);
             }
-            return; // 한 번만 합성 후 빠져나가기
+            return;
           }
         }
       }
-    }
-
-    function checkGameOver() {
-      for (let f of fruits) {
-        if (f.y - f.r < 0) {
-          gameOver();
-          break;
-        }
-      }
-    }
-
-    function gameOver() {
-      gameRunning = false;
-      gameOverText.style.display = "block";
-      startBtn.style.display = "block";
     }
 
     function loop() {
@@ -279,17 +192,45 @@
         f.update();
       }
 
-      handlePhysics();
+      // 충돌 물리 처리 (뚫고 지나가는 방지)
+      for (let i = 0; i < fruits.length; i++) {
+        for (let j = i + 1; j < fruits.length; j++) {
+          const a = fruits[i], b = fruits[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const dist = Math.hypot(dx, dy);
+          const minDist = a.r + b.r;
+          if (dist < minDist) {
+            const overlap = (minDist - dist) / 2;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            a.x += nx * overlap;
+            a.y += ny * overlap;
+            b.x -= nx * overlap;
+            b.y -= ny * overlap;
+            a.dy *= 0.98;
+            b.dy *= 0.98;
+          }
+        }
+      }
+
       mergeFruits();
-      checkGameOver();
 
       for (let f of fruits) f.draw();
-      if (droppingFruit) droppingFruit.draw();
+      if (dropping) dropping.draw();
+
+      // 게임오버: 과일이 위쪽 50px 넘어가면 종료
+      if (fruits.some(f => f.y - f.r < 50)) {
+        gameRunning = false;
+        startBtn.style.display = "block";
+        startBtn.textContent = "💀 다시 시작";
+      }
 
       requestAnimationFrame(loop);
     }
 
     startBtn.addEventListener("click", resetGame);
+    scoreboard.innerHTML = `점수: 0<br>최고점수: ${highScore}`;
   </script>
 </body>
 </html>
