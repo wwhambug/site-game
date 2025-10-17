@@ -220,7 +220,7 @@
       if (dropping) dropping.draw();
 
       // 게임오버: 과일이 위쪽 50px 넘어가면 종료
-      if (fruits.some(f => f.y - f.r < 50)) {
+      if (fruits.some(f => f.y - f.r < 70)) {
         gameRunning = false;
         startBtn.style.display = "block";
         startBtn.textContent = "💀 다시 시작";
