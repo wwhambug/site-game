@@ -61,7 +61,6 @@
     let score = 0;
     let highScore = parseInt(localStorage.getItem("highScore") || "0");
 
-    // 과일 정의 (작을수록 가볍고, 클수록 무거움)
     const fruitTypes = [
       { name: "체리", color: "#ff4d6d", r: 12, gravity: 0.25, score: 1 },
       { name: "딸기", color: "#ff6384", r: 18, gravity: 0.3, score: 2 },
@@ -102,27 +101,19 @@
         this.dy += this.type.gravity;
         this.y += this.dy;
 
-        // 바닥 충돌
         if (this.y + this.r > canvas.height) {
           this.y = canvas.height - this.r;
           this.dy *= -0.3;
         }
 
-        // 옆벽 충돌
-        if (this.x - this.r < 0) {
-          this.x = this.r;
-          this.dy *= 0.9;
-        }
-        if (this.x + this.r > canvas.width) {
-          this.x = canvas.width - this.r;
-          this.dy *= 0.9;
-        }
+        if (this.x - this.r < 0) this.x = this.r;
+        if (this.x + this.r > canvas.width) this.x = canvas.width - this.r;
       }
     }
 
     function spawnNewFruit() {
-      const rand = Math.random() < 0.9 ? 0 : 1; // 대부분 체리, 가끔 딸기
-      dropping = new Fruit(mouseX, 30, fruitTypes[rand]);
+      const rand = Math.random() < 0.9 ? 0 : 1; 
+      dropping = new Fruit(mouseX, 100, fruitTypes[rand]);
     }
 
     canvas.addEventListener("mousemove", e => {
@@ -188,11 +179,9 @@
       if (!gameRunning) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      for (let f of fruits) {
-        f.update();
-      }
+      for (let f of fruits) f.update();
 
-      // 충돌 물리 처리 (뚫고 지나가는 방지)
+      // 충돌 감속 (뚫기 방지)
       for (let i = 0; i < fruits.length; i++) {
         for (let j = i + 1; j < fruits.length; j++) {
           const a = fruits[i], b = fruits[j];
@@ -219,8 +208,8 @@
       for (let f of fruits) f.draw();
       if (dropping) dropping.draw();
 
-      // 게임오버: 과일이 위쪽 50px 넘어가면 종료
-      if (fruits.some(f => f.y - f.r < 70)) {
+      // ✅ 수정된 게임오버 조건: 화면 맨 위 닿으면 종료
+      if (fruits.some(f => f.y - f.r < 0)) {
         gameRunning = false;
         startBtn.style.display = "block";
         startBtn.textContent = "💀 다시 시작";
