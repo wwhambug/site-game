@@ -42,7 +42,7 @@ const TYPES=[
   {name:"수박2",r:68,color:"#27ae60"}
 ];
 
-const BASE_GRAV=0.25,SUBSTEPS=4,RESTITUTION=0.25,FRICTION=0.96,MERGE_HOLD_TIME=0.15,MERGE_DISTANCE_FACTOR=0.9;
+const BASE_GRAV=0.4,SUBSTEPS=4,RESTITUTION=0.25,FRICTION=0.96,MERGE_HOLD_TIME=0.15,MERGE_DISTANCE_FACTOR=0.9;
 
 let fruits=[],current=null,mouseX=W/2,running=false;
 const contactTimers=new Map();
@@ -65,7 +65,7 @@ function makeFruit(level,x=null,y=null){
   const t=TYPES[level];
   return {id:Date.now()+Math.random(),level,r:t.r,color:t.color,x:x??mouseX,y:y??100,vx:0,vy:0,mass:t.r*t.r/300,toRemove:false};
 }
-function spawnFruit(){current=makeFruit(Math.floor(Math.random()*7));}
+function spawnFruit(){current=makeFruit(0);} // 항상 체리부터 시작
 
 // 물리 업데이트
 function updatePhysics(dt){
@@ -137,8 +137,15 @@ function draw(){
   if(current){
     current.x=Math.max(current.r,Math.min(W-current.r,mouseX));
     ctx.beginPath(); ctx.arc(current.x,current.y,current.r,0,Math.PI*2); ctx.fillStyle=current.color; ctx.fill();
+    ctx.fillStyle="#fff"; ctx.font="12px bold"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(current.level+1,current.x,current.y);
   }
-  for(const f of fruits){ctx.beginPath(); ctx.arc(f.x,f.y,f.r,0,Math.PI*2); ctx.fillStyle=f.color; ctx.fill();}
+  for(const f of fruits){
+    ctx.beginPath(); ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
+    ctx.fillStyle=f.color; ctx.fill();
+    ctx.fillStyle="#fff"; ctx.font="12px bold"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(f.level+1,f.x,f.y);
+  }
 }
 
 // 게임오버
