@@ -3,14 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>레몬 게임 🍋</title>
+<title>수박 게임 🍉</title>
+<script src="https://cdn.jsdelivr.net/npm/p2@0.7.1/build/p2.min.js"></script>
 <style>
   body {
     margin: 0;
     background: linear-gradient(to bottom, #c9f2ff, #fff);
     overflow: hidden;
     font-family: "Pretendard", sans-serif;
+    text-align: center;
   }
+  #ui {
+    position: absolute;
+    top: 10px;
+    width: 100%;
+    color: #333;
+    font-weight: 600;
+    z-index: 2;
+  }
+  #score { font-size: 22px; }
+  #highscore { font-size: 16px; opacity: 0.8; }
   canvas {
     display: block;
     margin: 0 auto;
@@ -18,17 +30,6 @@
     border: 4px solid #333;
     border-radius: 10px;
   }
-  #ui {
-    position: absolute;
-    top: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    color: #333;
-    text-align: center;
-    font-weight: 600;
-  }
-  #score { font-size: 22px; }
-  #highscore { font-size: 16px; opacity: 0.7; }
 </style>
 </head>
 <body>
@@ -40,12 +41,11 @@
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+const world = new p2.World({ gravity: [0, -9.82] }); // 아래로 중력
 
 let score = 0;
 let highScore = localStorage.getItem("highScore") || 0;
 document.getElementById("highscore").textContent = "최고 점수: " + highScore;
-
-const GRAVITY_BASE = 0.05;
 
 const fruitTypes = [
   {name:"체리", color:"#ff4d4d", r:10, next:1},
@@ -65,120 +65,120 @@ const fruitTypes = [
   {name:"황금수박", color:"#ffd700", r:130, next:null}
 ];
 
-let fruits = [];
-let current = createFruit();
+// 바닥, 벽 생성
+const ground = new p2.Body({ position: [0, -290] });
+ground.addShape(new p2.Plane());
+world.addBody(ground);
 
-function createFruit(typeIndex = 0, x = canvas.width/2, y = 60) {
-  const f = fruitTypes[typeIndex];
-  return {
-    ...f,
-    x,
-    y,
-    vy: 0,
-    isStatic: false
-  };
-}
+const leftWall = new p2.Body({ position: [-200, 0], angle: Math.PI / 2 });
+leftWall.addShape(new p2.Plane());
+world.addBody(leftWall);
+
+const rightWall = new p2.Body({ position: [200, 0], angle: -Math.PI / 2 });
+rightWall.addShape(new p2.Plane());
+world.addBody(rightWall);
+
+let fruits = [];
+let current = spawnFruit(0);
 
 canvas.addEventListener("click", () => {
   fruits.push(current);
-  current = createFruit(Math.floor(Math.random()*3)); // 초반엔 작은 과일만
+  current = spawnFruit(Math.floor(Math.random() * 3));
 });
 
-function update() {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+function spawnFruit(typeIndex = 0, x = 0, y = 250) {
+  const f = fruitTypes[typeIndex];
+  const body = new p2.Body({
+    mass: 1 + f.r / 10,
+    position: [x, y],
+    angularVelocity: Math.random() * 2 - 1
+  });
+  body.addShape(new p2.Circle(f.r));
+  body.fruitType = typeIndex;
+  world.addBody(body);
+  return body;
+}
 
-  // 과일 표시
-  for (let f of fruits) {
-    if (!f.isStatic) {
-      // 중력 (크기 커질수록 10배 강화)
-      const g = GRAVITY_BASE * (1 + f.r / 10);
-      f.vy += g;
-      f.y += f.vy;
-      if (f.y + f.r > canvas.height - 10) {
-        f.y = canvas.height - 10 - f.r;
-        f.vy = 0;
-        f.isStatic = true;
-      }
+// 충돌 감지 및 합성
+world.on("beginContact", (evt) => {
+  const a = evt.bodyA;
+  const b = evt.bodyB;
+  if (a.fruitType == null || b.fruitType == null) return;
+  if (a.fruitType === b.fruitType) {
+    const next = fruitTypes[a.fruitType].next;
+    if (next != null) {
+      const nx = (a.position[0] + b.position[0]) / 2;
+      const ny = (a.position[1] + b.position[1]) / 2;
+      const newF = spawnFruit(next, nx, ny + 5);
+      world.removeBody(a);
+      world.removeBody(b);
+      fruits = fruits.filter(f => f !== a && f !== b);
+      fruits.push(newF);
+      score += fruitTypes[a.fruitType].r * 2;
+      document.getElementById("score").textContent = "점수: " + score;
     }
   }
+});
 
-  // 충돌 항상 검사
-  for (let i=0;i<fruits.length;i++) {
-    for (let j=i+1;j<fruits.length;j++) {
-      const a = fruits[i];
-      const b = fruits[j];
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < a.r + b.r) {
-        // 충돌 처리
-        const overlap = (a.r + b.r) - dist;
-        const nx = dx / dist;
-        const ny = dy / dist;
-        a.x += nx * overlap/2;
-        a.y += ny * overlap/2;
-        b.x -= nx * overlap/2;
-        b.y -= ny * overlap/2;
-        // 합성
-        if (a.name === b.name && a.next != null) {
-          const newF = createFruit(a.next, (a.x+b.x)/2, (a.y+b.y)/2);
-          newF.vy = 0;
-          fruits.splice(j,1);
-          fruits.splice(i,1,newF);
-          score += a.r * 2;
-          document.getElementById("score").textContent = "점수: " + score;
-        }
-      }
-    }
-  }
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.scale(1, -1);
 
-  // 게임오버 (천장 닿으면)
   for (let f of fruits) {
-    if (f.y - f.r < 0) {
-      gameOver();
-      return;
-    }
-  }
-
-  // 현재 과일 표시
-  ctx.beginPath();
-  ctx.arc(current.x, current.y, current.r, 0, Math.PI*2);
-  ctx.fillStyle = current.color;
-  ctx.fill();
-  ctx.closePath();
-  ctx.fillStyle = "#000";
-  ctx.font = "12px bold";
-  ctx.fillText(fruitTypes.indexOf(fruitTypes.find(t=>t.name===current.name)), current.x-3, current.y+3);
-
-  // 모든 과일 표시
-  for (let f of fruits) {
+    const t = fruitTypes[f.fruitType];
+    const x = f.position[0];
+    const y = f.position[1];
     ctx.beginPath();
-    ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
-    ctx.fillStyle = f.color;
+    ctx.arc(x, y, t.r, 0, Math.PI * 2);
+    ctx.fillStyle = t.color;
     ctx.fill();
     ctx.closePath();
-    ctx.fillStyle = "#000";
-    ctx.font = "12px bold";
-    ctx.fillText(fruitTypes.indexOf(fruitTypes.find(t=>t.name===f.name)), f.x-3, f.y+3);
   }
 
-  requestAnimationFrame(update);
+  const cur = fruitTypes[current.fruitType];
+  ctx.beginPath();
+  ctx.arc(current.position[0], current.position[1], cur.r, 0, Math.PI * 2);
+  ctx.fillStyle = cur.color;
+  ctx.globalAlpha = 0.6;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.closePath();
+
+  ctx.restore();
 }
+
 function gameOver() {
   ctx.fillStyle = "rgba(0,0,0,0.5)";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#fff";
   ctx.font = "28px bold";
-  ctx.fillText("게임 오버!", canvas.width/2 - 70, canvas.height/2);
-  ctx.fillText("점수: " + score, canvas.width/2 - 50, canvas.height/2 + 40);
+  ctx.fillText("게임 오버!", 120, 280);
+  ctx.fillText("점수: " + score, 130, 320);
   if (score > highScore) {
     highScore = score;
     localStorage.setItem("highScore", score);
   }
   document.getElementById("highscore").textContent = "최고 점수: " + highScore;
-  setTimeout(()=>location.reload(),2000);
+  setTimeout(() => location.reload(), 2000);
 }
-update();
+
+function loop() {
+  world.step(1 / 60);
+
+  // 천장 닿았는지 확인
+  for (let f of fruits) {
+    if (f.position[1] > 280) {
+      gameOver();
+      return;
+    }
+  }
+
+  render();
+  requestAnimationFrame(loop);
+}
+loop();
 </script>
 </body>
 </html>
