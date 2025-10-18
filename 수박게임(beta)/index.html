@@ -3,65 +3,55 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>수박 게임 — 마우스 조준판</title>
+<title>수박 게임 — 지속 접촉 합성판</title>
 <style>
-  :root { --bg: #f8fff8; --panel:#fffef0; --accent:#f4c542; }
-  html,body{height:100%;margin:0;background:linear-gradient(180deg,#e6f7ff,#fff);font-family:Inter,system-ui,Arial}
+  :root{--bg:#f0fdf4;--panel:#fffef6;--accent:#fbbf24}
+  html,body{height:100%;margin:0;background:linear-gradient(#e6f7ff,#fff);font-family:Inter,system-ui,Arial}
   .wrap{height:100vh;display:flex;align-items:center;justify-content:center}
   canvas{background:var(--panel);border-radius:12px;box-shadow:0 10px 30px rgba(20,30,50,0.12)}
-  .hud{position:fixed;left:18px;top:18px;background:rgba(255,255,255,0.9);padding:10px;border-radius:8px;font-weight:700}
-  .controls{position:fixed;right:18px;top:18px;display:flex;gap:8px}
+  .hud{position:fixed;left:16px;top:16px;background:rgba(255,255,255,0.9);padding:10px;border-radius:8px;font-weight:700}
+  .controls{position:fixed;right:16px;top:16px;display:flex;gap:8px}
   button{padding:8px 12px;border-radius:8px;border:none;background:var(--accent);cursor:pointer}
-  #msg{position:fixed;left:50%;top:12px;transform:translateX(-50%);font-weight:800;color:#b91c1c}
+  #msg{position:fixed;left:50%;top:14px;transform:translateX(-50%);font-weight:800;color:#b91c1c}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <canvas id="c" width="420" height="660"></canvas>
-</div>
-
-<div class="hud">
-  점수: <span id="score">0</span><br>
-  최고: <span id="high">0</span>
-</div>
+<div class="wrap"><canvas id="c" width="420" height="660"></canvas></div>
+<div class="hud">점수: <span id="score">0</span><br>최고: <span id="high">0</span></div>
 <div id="msg"></div>
-<div class="controls">
-  <button id="startBtn">시작</button>
-  <button id="resetBtn">리셋</button>
-</div>
+<div class="controls"><button id="startBtn">시작</button><button id="resetBtn">리셋</button></div>
 
 <script>
 /*
-  수박 게임 — 물리 개선판 (단일 파일)
-  - 마우스/터치로 조준
-  - 중력 크기별 스케일(최대 10배)
-  - 서브스텝 충돌 검사(항상 충돌 확인)
-  - 합성 안정화 + 점수/최고점수
-  - 게임오버(과일이 캔버스 위로 튀어나가면)
+  Suika-style game — 지속 접촉 기반 합성 구현
+  주요:
+  - 마우스/터치로 조준 -> 클릭/탭으로 드롭
+  - 크기 비례 중력(최대 10배)
+  - 서브스텝 물리 + 매 프레임 쌍별 접촉 타이머 누적
+  - 접촉시간 >= MERGE_HOLD_TIME 이면 합성 발생
+  - 충돌 보정/충돌 응답 포함
+  - 안전한 합성 처리, 점수/최고점수 저장
 */
 
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
+const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
-const scoreEl = document.getElementById('score');
-const highEl  = document.getElementById('high');
-const startBtn = document.getElementById('startBtn');
-const resetBtn = document.getElementById('resetBtn');
+const scoreEl = document.getElementById('score'), highEl = document.getElementById('high');
+const startBtn = document.getElementById('startBtn'), resetBtn = document.getElementById('resetBtn');
 const msgEl = document.getElementById('msg');
 
 let running = false;
 let score = 0;
-let high = parseInt(localStorage.getItem('suika_high') || '0', 10);
+let high = parseInt(localStorage.getItem('suika_high')||'0',10);
 highEl.textContent = high;
 
-const SUBSTEPS = 4;            // 서브스텝 수 (충돌 안정화)
-const BASE_GRAV = 0.25;        // 기본 중력
-const MAX_GRAV_MULT = 10;      // 최대 몇 배까지
-const RESTITUTION = 0.15;      // 튕김 계수
-const FRICTION = 0.98;         // 공통 마찰(속도감소)
-const MERGE_DISTANCE_FACTOR = 0.6; // 완전 겹침 기준(둘이 중심거리 < factor*(r1+r2))
+const SUBSTEPS = 4;
+const BASE_GRAV = 0.25;
+const MAX_GRAV_MULT = 10;
+const RESTITUTION = 0.18;
+const FRICTION = 0.98;
+const MERGE_HOLD_TIME = 0.12; // seconds of continuous contact required
+const MERGE_DISTANCE_FACTOR = 0.85; // distance factor to consider “in contact”
 
-// 과일 타입 정의 (원하면 더 추가 가능)
 const TYPES = [
   {name:'체리', r:10, color:'#ff3b5c', baseScore:1},
   {name:'딸기', r:16, color:'#ff6b88', baseScore:2},
@@ -75,146 +65,122 @@ const TYPES = [
   {name:'두리안', r:110, color:'#84cc16', baseScore:800}
 ];
 
-const MIN_R = TYPES[0].r;
-const MAX_R = TYPES[TYPES.length-1].r;
+const MIN_R = TYPES[0].r, MAX_R = TYPES[TYPES.length-1].r;
+let fruits = [], current = null, pointerX = W/2;
+let particles = [];
 
-let fruits = [];    // 현재 게임에 있는 과일들
-let current = null; // 대기 과일 (마우스 따라다님)
-let pointerX = W/2; // 마우스 x (또는 터치)
-let lastSpawnTime = 0;
+/* utilities */
+const rand = (a,b)=>Math.random()*(b-a)+a;
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const massForR = r => Math.PI * r * r / 1000;
+const gravMultForR = r => 1 + ((r - MIN_R) / (MAX_R - MIN_R)) * (MAX_GRAV_MULT - 1);
 
-// 유틸 함수
-function rand(min,max){ return Math.random()*(max-min)+min; }
-function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+/* unique id */
+let _idCounter = 1;
+function nextId(){ return (_idCounter++).toString(); }
 
-// 질량 계산 (r^2 비례)
-function massForRadius(r){ return Math.PI * r * r / 1000; }
-
-// 중력 multiplier (r 기준 1 ~ MAX_GRAV_MULT)
-function gravMultForR(r){
-  const t = (r - MIN_R) / (MAX_R - MIN_R);
-  return 1 + t * (MAX_GRAV_MULT - 1);
-}
-
-// 새 과일 생성 (level 인덱스)
-function makeFruit(level, x = null, y = null){
+/* create fruit object */
+function makeFruit(level,x=null,y=null){
   const t = TYPES[level];
-  const r = t.r;
-  const obj = {
-    id: Math.random().toString(36).slice(2,9),
+  return {
+    id: nextId(),
     level,
-    r,
+    r: t.r,
     color: t.color,
-    x: x === null ? clamp(pointerX, r+8, W-r-8) : x,
-    y: y === null ? 120 : y, // 안전한 시작 높이
-    vx: 0,
-    vy: 0,
-    mass: massForRadius(r),
-    remove: false
+    x: x === null ? clamp(pointerX, t.r+8, W - t.r - 8) : x,
+    y: y === null ? 120 : y,
+    vx: 0, vy: 0,
+    mass: massForR(t.r),
+    removed: false,
   };
-  return obj;
 }
 
-// 스폰: 보통 작은 과일(체리) 위주
+/* spawn current to follow pointer */
 function spawnCurrent(){
-  const idx = Math.random() < 0.9 ? 0 : 1;
+  const idx = Math.random() < 0.9 ? 0 : 1; // mostly small ones
   current = makeFruit(idx);
 }
 
-// 입자(간단) — 시각효과
-function spawnParticles(x,y,color,count=10){
-  for(let i=0;i<count;i++){
-    const p = {x,y, vx:rand(-2,2), vy:rand(-3,1), life:rand(20,50), age:0, color, s:rand(2,5)};
-    particles.push(p);
+/* particles */
+function spawnParticles(x,y,color,n=12){
+  for(let i=0;i<n;i++){
+    particles.push({x,y,vx:rand(-3,3),vy:rand(-4,1),age:0,life:rand(24,48),s:rand(2,5),color});
   }
 }
-let particles = [];
 
-// 입력: 마우스/터치
-canvas.addEventListener('mousemove', (e)=> {
-  const rect = canvas.getBoundingClientRect();
-  pointerX = (e.clientX - rect.left) * (W / rect.width);
-  if(current) current.x = clamp(pointerX, current.r+6, W-current.r-6);
+/* input */
+canvas.addEventListener('mousemove', e=>{
+  const r = canvas.getBoundingClientRect();
+  pointerX = (e.clientX - r.left) * (W / r.width);
+  if(current) current.x = clamp(pointerX, current.r+6, W - current.r - 6);
 });
-canvas.addEventListener('touchmove', (e)=> {
+canvas.addEventListener('touchmove', e=>{
   e.preventDefault();
-  const rect = canvas.getBoundingClientRect();
-  pointerX = (e.touches[0].clientX - rect.left) * (W / rect.width);
-  if(current) current.x = clamp(pointerX, current.r+6, W-current.r-6);
-}, {passive:false});
+  const r = canvas.getBoundingClientRect();
+  pointerX = (e.touches[0].clientX - r.left) * (W / r.width);
+  if(current) current.x = clamp(pointerX, current.r+6, W - current.r - 6);
+},{passive:false});
 
-canvas.addEventListener('click', ()=> dropCurrent());
-canvas.addEventListener('touchend', (e)=> { e.preventDefault(); dropCurrent(); }, {passive:false});
-
-// 현재 과일 드롭
 function dropCurrent(){
-  if(!running) return;
-  if(!current) return;
-  // add small horizontal kick from pointer movement randomness
-  current.vx = 0;
-  current.vy = 0;
+  if(!running || !current) return;
+  current.vx = 0; current.vy = 0;
   fruits.push(current);
   current = null;
-  lastSpawnTime = performance.now();
-  setTimeout(spawnCurrent, 350); // 딜레이 있어야 안정적
+  setTimeout(spawnCurrent, 300);
 }
+canvas.addEventListener('click', dropCurrent);
+canvas.addEventListener('touchend', (e)=>{ e.preventDefault(); dropCurrent(); }, {passive:false});
+window.addEventListener('keydown', e=>{ if(e.code === 'Space') dropCurrent(); });
 
-// 물리 업데이트: 서브스텝으로 나눠서 계산
+/* contact timers map: key "idA|idB" with ids sorted */
+const contactTimers = new Map();
+function pairKey(a,b){ return a < b ? a + '|' + b : b + '|' + a; }
+
+/* physics step with substeps */
 function physicsStep(dt){
-  // dt: 초 단위 (예: 1/60)
   const subDt = dt / SUBSTEPS;
   for(let s=0;s<SUBSTEPS;s++){
-    // 1) 중력 & integrate
+    // integrate gravity & velocity
     for(const f of fruits){
-      // 중력 배수(크기별)
-      const gmult = gravMultForR(f.r);
-      const g = BASE_GRAV * gmult;
-      // 크기가 크면 중력 '더 강하지만' 관성도 크므로 실제 가속도는 영향
-      f.vy += g * subDt * 60; // scale to feel natural (frame-indep)
+      const g = BASE_GRAV * gravMultForR(f.r);
+      f.vy += g * subDt * 60; // scaled for feel
       f.x += f.vx * subDt * 60;
       f.y += f.vy * subDt * 60;
-      // apply minor air friction
+      // mild air drag
       f.vx *= 0.999;
       f.vy *= 0.999;
     }
 
-    // 2) 벽/바닥 충돌
+    // wall & floor collisions
     for(const f of fruits){
-      // 바닥
       if(f.y + f.r > H){
         f.y = H - f.r;
         f.vy = -Math.abs(f.vy) * RESTITUTION;
         f.vx *= FRICTION;
-        // 작게 흔들림 보정
-        if(Math.abs(f.vy) < 0.5) f.vy = 0;
-        if(Math.abs(f.vx) < 0.02) f.vx = 0;
+        if(Math.abs(f.vy) < 0.4) f.vy = 0;
       }
-      // 좌우
       if(f.x - f.r < 0){
-        f.x = f.r;
-        f.vx = Math.abs(f.vx) * RESTITUTION;
+        f.x = f.r; f.vx = Math.abs(f.vx) * RESTITUTION;
       }
       if(f.x + f.r > W){
-        f.x = W - f.r;
-        f.vx = -Math.abs(f.vx) * RESTITUTION;
+        f.x = W - f.r; f.vx = -Math.abs(f.vx) * RESTITUTION;
       }
     }
 
-    // 3) 충돌 처리: 모든 쌍 검사하여 겹침 보정 및 충돌 반응
-    // 먼저 겹침 보정(분리)
+    // pairwise collisions: separation + impulse + contact timers
+    // first mark collisions for this substep
+    const collidedPairsThisStep = new Set();
     for(let i=0;i<fruits.length;i++){
       for(let j=i+1;j<fruits.length;j++){
         const A = fruits[i], B = fruits[j];
-        if(A.remove || B.remove) continue;
-        const dx = A.x - B.x;
-        const dy = A.y - B.y;
+        if(A.removed || B.removed) continue;
+        const dx = A.x - B.x, dy = A.y - B.y;
         const dist = Math.hypot(dx,dy) || 0.0001;
-        const minD = A.r + B.r;
-        if(dist < minD){
-          const overlap = (minD - dist);
-          const nx = dx / dist;
-          const ny = dy / dist;
-          // 상대 질량 비율로 밀어냄 (질량 큰 쪽 덜 움직임)
+        const minDist = A.r + B.r;
+        if(dist < minDist){
+          // separation
+          const overlap = minDist - dist;
+          const nx = dx / dist, ny = dy / dist;
           const totalMass = A.mass + B.mass;
           const ax = nx * overlap;
           const ay = ny * overlap;
@@ -223,260 +189,220 @@ function physicsStep(dt){
           B.x -= ax * (A.mass / totalMass);
           B.y -= ay * (A.mass / totalMass);
 
-          // 반발 속도(간단한 충돌 반응)
-          // 상대속도의 법선 성분을 반사
-          const relVx = B.vx - A.vx;
-          const relVy = B.vy - A.vy;
-          const relAlongNormal = relVx * nx + relVy * ny;
-          if(relAlongNormal > 0) {
-            // impulse scalar
+          // relative velocity along normal
+          const relVx = B.vx - A.vx, relVy = B.vy - A.vy;
+          const relAlong = relVx * nx + relVy * ny;
+          // apply impulse only if closing
+          if(relAlong > 0){
             const e = RESTITUTION;
-            const jimp = (-(1+e) * relAlongNormal) / (1/A.mass + 1/B.mass);
-            const impulseX = jimp * nx;
-            const impulseY = jimp * ny;
-            A.vx -= impulseX / A.mass;
-            A.vy -= impulseY / A.mass;
-            B.vx += impulseX / B.mass;
-            B.vy += impulseY / B.mass;
+            const jimp = (-(1+e) * relAlong) / (1/A.mass + 1/B.mass);
+            const ix = jimp * nx, iy = jimp * ny;
+            A.vx -= ix / A.mass; A.vy -= iy / A.mass;
+            B.vx += ix / B.mass; B.vy += iy / B.mass;
           }
+          // friction-like tangential damping (small)
+          const tx = -ny, ty = nx;
+          const relTan = relVx * tx + relVy * ty;
+          const tanImp = relTan * 0.02;
+          A.vx -= (tanImp * tx) / A.mass; A.vy -= (tanImp * ty) / A.mass;
+          B.vx += (tanImp * tx) / B.mass; B.vy += (tanImp * ty) / B.mass;
+
+          // register contact for merge detection
+          const key = pairKey(A.id, B.id);
+          collidedPairsThisStep.add(key);
         }
       }
     }
 
-    // 4) 마찰으로 속도 감소(매 서브스텝)
+    // update contactTimers map: increase for present pairs, reset for missing pairs
+    // accumulate subDt*60 scale to be frame-time consistent (we'll use real-time below)
+    // We'll accumulate actual seconds: subDt (seconds)
+    // First, mark seen pairs
+    const seenKeys = new Set();
+    for(const key of collidedPairsThisStep) seenKeys.add(key);
+    // increment for seen
+    for(const key of seenKeys){
+      const prev = contactTimers.get(key) || 0;
+      contactTimers.set(key, prev + subDt);
+    }
+    // decrement/reset for keys not seen (remove if absent)
+    // we must remove keys not in seenKeys
+    for(const key of Array.from(contactTimers.keys())){
+      if(!seenKeys.has(key)){
+        contactTimers.delete(key);
+      }
+    }
+
+    // minor velocity damping each substep
     for(const f of fruits){
       f.vx *= 0.999;
       f.vy *= 0.999;
     }
-  }
+  } // end substep loop
 }
 
-// 합성 검사 및 처리 (프레임 단위로 안전하게 처리)
+/* merge handling: check timers and perform merges */
 function handleMerges(){
-  // 한 프레임에 동일 과일의 중복 합성 문제를 피하려면
-  // 발견된 합성 쌍을 모아서 처리 (최대 한 번씩)
-  const mergedPairs = [];
-  const taken = new Set();
-
-  for(let i=0;i<fruits.length;i++){
-    for(let j=i+1;j<fruits.length;j++){
-      const A = fruits[i], B = fruits[j];
-      if(A.remove || B.remove) continue;
-      if(A.level !== B.level) continue;
-      const dx = A.x - B.x, dy = A.y - B.y;
-      const dist = Math.hypot(dx,dy);
-      // 합성 조건: 충분히 겹쳐있거나 천천히 붙어있는 경우
-      const mergeThreshold = MERGE_DISTANCE_FACTOR * (A.r + B.r);
-      if(dist < mergeThreshold){
-        // 마크 둘다 예약
-        if(taken.has(A.id) || taken.has(B.id)) continue;
-        mergedPairs.push([i,j]);
-        taken.add(A.id); taken.add(B.id);
+  // gather merge pairs whose timer >= threshold and still both exist
+  const pairsToMerge = [];
+  for(const [key, tval] of contactTimers.entries()){
+    if(tval >= MERGE_HOLD_TIME){
+      const ids = key.split('|');
+      const A = fruits.find(x => x.id === ids[0]);
+      const B = fruits.find(x => x.id === ids[1]);
+      if(!A || !B) { contactTimers.delete(key); continue; }
+      if(A.level === B.level){
+        // ensure still physically overlapping enough (safety)
+        const dx = A.x - B.x, dy = A.y - B.y, dist = Math.hypot(dx,dy);
+        if(dist < MERGE_DISTANCE_FACTOR * (A.r + B.r)){
+          pairsToMerge.push([A,B]);
+        } else {
+          // if separated, reset timer
+          contactTimers.delete(key);
+        }
+      } else {
+        contactTimers.delete(key);
       }
     }
   }
 
-  if(mergedPairs.length === 0) return;
+  if(pairsToMerge.length === 0) return;
 
-  // 처리: 역순으로 인덱스 삭제 안전하게
-  // accumulate new fruits after deletions
-  const toAdd = [];
-  const toRemoveIndices = new Set();
-  for(const [i,j] of mergedPairs){
-    if(fruits[i].remove || fruits[j].remove) continue;
-    const A = fruits[i], B = fruits[j];
+  // To avoid double merges/conflicts, mark ids used
+  const used = new Set();
+  for(const [A,B] of pairsToMerge){
+    if(used.has(A.id) || used.has(B.id)) continue;
+    used.add(A.id); used.add(B.id);
+    // compute spawn level
     const nextLevel = Math.min(A.level + 1, TYPES.length - 1);
     const nx = (A.x + B.x) / 2;
     const ny = (A.y + B.y) / 2;
-    // create merged fruit
-    const merged = makeFruit(nextLevel, nx, ny - 4); // 약간 위로 올려서 튀게
-    // velocity: 보존된 운동량 기반
-    merged.vx = (A.vx * A.mass + B.vx * B.mass) / (A.mass + B.mass);
-    merged.vy = Math.min(-2, (A.vy * A.mass + B.vy * B.mass) / (A.mass + B.mass) - 2); // 약간 튀어오르게
-    toAdd.push(merged);
-    // mark removes
-    A.remove = true; B.remove = true;
-    toRemoveIndices.add(i); toRemoveIndices.add(j);
-    // score: add baseScore of next level (or combined)
+    // momentum conservation (approx)
+    const totalMass = A.mass + B.mass;
+    const vx = (A.vx * A.mass + B.vx * B.mass) / totalMass;
+    const vy = (A.vy * A.mass + B.vy * B.mass) / totalMass - 2; // give slight upward kick
+    // mark removed
+    A.removed = true; B.removed = true;
+    // remove contact timers involving them
+    for(const key of Array.from(contactTimers.keys())){
+      if(key.includes(A.id) || key.includes(B.id)) contactTimers.delete(key);
+    }
+    // create merged fruit with preserved momentum
+    const merged = makeFruit(nextLevel, nx, ny - 4);
+    merged.vx = vx; merged.vy = vy;
+    fruits.push(merged);
+    spawnParticles(nx, ny, merged.color, 20);
+    // score increment
     const gain = TYPES[nextLevel].baseScore * 10;
     score += gain;
     scoreEl.textContent = score;
-    // particle effect
-    spawnParticles(nx, ny, merged.color, 18);
+    if(score > high){ high = score; localStorage.setItem('suika_high', high.toString()); highEl.textContent = high; }
   }
 
-  // filter out removed items
-  fruits = fruits.filter(f => !f.remove);
-  // add new merged fruits
-  fruits.push(...toAdd);
-
-  // update highscore if needed
-  if(score > high){
-    high = score;
-    localStorage.setItem('suika_high', high.toString());
-    highEl.textContent = high;
-  }
+  // filter removed fruits
+  fruits = fruits.filter(f => !f.removed);
 }
 
-// 렌더링
+/* render */
 function render(){
   ctx.clearRect(0,0,W,H);
-  // 배경 가벼운 그라데이션
+  // background
   const g = ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,'#e8fbff'); g.addColorStop(1,'#fffef0');
-  ctx.fillStyle = g;
-  ctx.fillRect(0,0,W,H);
+  g.addColorStop(0,'#e7fbff'); g.addColorStop(1,'#fffef0');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
-  // 바닥 표시
-  ctx.fillStyle = "#e6e6e6";
-  ctx.fillRect(0,H-10,W,10);
+  // floor
+  ctx.fillStyle = "#eaeaea"; ctx.fillRect(0,H-12,W,12);
 
-  // 모든 과일
+  // fruits
   for(const f of fruits){
     // shadow
     ctx.beginPath();
-    ctx.ellipse(f.x, f.y + f.r*0.5, f.r*0.9, f.r*0.35, 0, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(0,0,0,0.06)";
-    ctx.fill();
+    ctx.ellipse(f.x, f.y + f.r*0.6, f.r*0.9, f.r*0.35, 0, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(0,0,0,0.06)"; ctx.fill();
 
-    // fruit circle
     ctx.beginPath();
-    ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
-    ctx.fillStyle = f.color;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.stroke();
+    ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
+    ctx.fillStyle = f.color; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.stroke();
 
-    // level number
+    // number label
     ctx.fillStyle = "rgba(0,0,0,0.6)";
     ctx.font = Math.max(10, Math.floor(f.r/1.6)) + "px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText((f.level+1).toString(), f.x, f.y);
   }
 
   // particles
   for(let i=particles.length-1;i>=0;i--){
-    const p = particles[i];
-    p.age++;
-    p.x += p.vx; p.y += p.vy;
-    p.vy += 0.12;
-    ctx.globalAlpha = 1 - (p.age / p.life);
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.s, 0, Math.PI*2);
-    ctx.fillStyle = p.color;
-    ctx.fill();
+    const p = particles[i]; p.age++;
+    p.x += p.vx; p.y += p.vy; p.vy += 0.12;
+    ctx.globalAlpha = 1 - p.age / p.life;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.s,0,Math.PI*2); ctx.fillStyle = p.color; ctx.fill();
     ctx.globalAlpha = 1;
     if(p.age >= p.life) particles.splice(i,1);
   }
 
-  // current (대기 과일)
+  // current (follow pointer)
   if(current){
-    // semi-transparent following pointer
-    ctx.beginPath();
-    ctx.arc(current.x, current.y, current.r, 0, Math.PI*2);
-    ctx.fillStyle = current.color;
-    ctx.globalAlpha = 0.85;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = "#fff8";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.font = Math.max(10, Math.floor(current.r/1.6)) + "px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText((current.level+1).toString(), current.x, current.y);
+    ctx.beginPath(); ctx.arc(current.x,current.y,current.r,0,Math.PI*2);
+    ctx.fillStyle = current.color; ctx.globalAlpha = 0.9; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = "#fff8"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.font = Math.max(10,Math.floor(current.r/1.6)) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText((current.level+1).toString(), current.x, current.y);
   }
 }
 
-// 게임오버 처리
-let gameOverFlag = false;
+/* game over check */
 function checkGameOver(){
   for(const f of fruits){
     if(f.y - f.r < 0){
-      gameOverFlag = true;
       running = false;
-      msgEl.textContent = "게임 오버! 점수: " + score;
-      // 최고점 저장 (이미 updated in merges)
-      setTimeout(()=>{ msgEl.textContent = ""; startBtn.disabled = false; }, 2000);
-      return;
+      msgEl.textContent = `게임 오버! 점수: ${score}`;
+      setTimeout(()=>{ msgEl.textContent = ""; startBtn.disabled = false; }, 1600);
+      return true;
     }
   }
+  return false;
 }
 
-// 메인 루프
+/* main loop */
 let lastTime = performance.now();
 function loop(now){
   if(!running) return;
-  const dt = (now - lastTime) / 1000; // 초
+  const dt = Math.min( (now - lastTime) / 1000, 1/20 );
   lastTime = now;
 
-  // 안정화를 위해 dt clamp
-  const cappedDt = Math.min(dt, 1/30);
-
-  // 물리
-  physicsStep(cappedDt);
-
-  // 합성 처리 (매 프레임)
+  physicsStep(dt);
   handleMerges();
-
-  // 렌더
   render();
-
-  // 게임오버 체크
-  checkGameOver();
-
-  requestAnimationFrame(loop);
+  if(!checkGameOver()) requestAnimationFrame(loop);
 }
 
-// 시작/리셋
+/* start/reset */
 function startGame(){
-  fruits = [];
-  particles = [];
-  current = null;
-  score = 0;
-  scoreEl.textContent = score;
-  msgEl.textContent = "";
-  gameOverFlag = false;
-  spawnCurrent();
-  running = true;
-  startBtn.disabled = true;
-  lastTime = performance.now();
+  fruits = []; particles = []; contactTimers.clear();
+  current = null; score = 0; scoreEl.textContent = 0; msgEl.textContent = "";
+  spawnCurrent(); running = true; startBtn.disabled = true; lastTime = performance.now();
   requestAnimationFrame(loop);
 }
-
 function resetGame(){
-  running = false;
-  fruits = [];
-  particles = [];
-  current = null;
-  score = 0;
-  scoreEl.textContent = 0;
-  msgEl.textContent = "";
-  startBtn.disabled = false;
-  high = parseInt(localStorage.getItem('suika_high') || '0',10);
-  highEl.textContent = high;
+  running = false; fruits = []; particles = []; current = null; score = 0;
+  scoreEl.textContent = 0; msgEl.textContent = ""; startBtn.disabled = false;
+  high = parseInt(localStorage.getItem('suika_high')||'0',10); highEl.textContent = high;
 }
 
-// 스페이스로도 드롭 가능
-window.addEventListener('keydown', (e)=>{
-  if(e.code === 'Space'){ dropCurrent(); }
-});
+/* spawn initial current */
+function spawnCurrent(){
+  const idx = Math.random() < 0.9 ? 0 : 1;
+  current = makeFruit(idx);
+}
 
-startBtn.addEventListener('click', ()=> startGame());
-resetBtn.addEventListener('click', ()=> resetGame());
-
-// 초기 세팅
-highEl.textContent = high;
-spawnCurrent();
-
-// 모바일: 화면 탭으로 드롭 가능 (handled above touchend)
-// 안내 문구 잠깐 보여주기
-msgEl.textContent = "클릭/탭으로 과일 드롭 — 마우스로 좌우 조준";
-setTimeout(()=> msgEl.textContent = "", 2500);
+/* UI */
+startBtn.addEventListener('click', startGame);
+resetBtn.addEventListener('click', resetGame);
+msgEl.textContent = "클릭/탭으로 드롭 — 마우스로 좌우 조준";
+setTimeout(()=> msgEl.textContent = "", 2200);
 
 </script>
 </body>
