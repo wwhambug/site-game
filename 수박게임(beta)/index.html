@@ -1,176 +1,225 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>수박 게임</title>
-<style>
-body{margin:0;font-family:sans-serif;background:linear-gradient(#aee1f9,#fff);overflow:hidden;}
-canvas{display:block;margin:20px auto;background:#fff9ec;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,0.15);}
-#hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,0.8);border-radius:10px;padding:8px 16px;text-align:center;font-weight:600;}
-#hud span{font-size:18px;}
-#startBtn{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:12px 24px;font-size:18px;border:none;border-radius:8px;background:#fbbf24;color:#000;cursor:pointer;}
-</style>
+  <meta charset="UTF-8" />
+  <title>수박 게임 🍉</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #fffbe6;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: sans-serif;
+      user-select: none;
+    }
+    canvas {
+      background: #fef3c7;
+      border: 5px solid #fcd34d;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
+    #startBtn {
+      position: absolute;
+      padding: 10px 28px;
+      font-size: 20px;
+      background: #fcd34d;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    #startBtn:hover { background: #fde047; }
+    #scoreboard {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 18px;
+      background: rgba(255,255,255,0.6);
+      padding: 8px 12px;
+      border-radius: 6px;
+    }
+  </style>
 </head>
 <body>
-<div id="hud">점수: <span id="score">0</span> ｜ 최고: <span id="high">0</span></div>
-<button id="startBtn">게임 시작</button>
-<canvas id="c" width="420" height="660"></canvas>
-<script>
-const canvas=document.getElementById("c"),ctx=canvas.getContext("2d");
-const W=canvas.width,H=canvas.height;
-const scoreEl=document.getElementById("score"),highEl=document.getElementById("high");
-let score=0,high=parseInt(localStorage.getItem("suika_high")||"0");highEl.textContent=high;
+  <button id="startBtn">🍉 게임 시작</button>
+  <div id="scoreboard">점수: 0<br>최고점수: 0</div>
+  <canvas id="gameCanvas" width="400" height="600"></canvas>
 
-const TYPES=[
-  {name:"체리",r:10,color:"#ff4d4d"},
-  {name:"딸기",r:16,color:"#ff6b81"},
-  {name:"포도",r:22,color:"#9b59b6"},
-  {name:"사과",r:30,color:"#e74c3c"},
-  {name:"레몬",r:38,color:"#f9ca24"},
-  {name:"멜론",r:48,color:"#27ae60"},
-  {name:"수박",r:64,color:"#2ecc71"},
-  {name:"파인애플",r:50,color:"#f1c40f"},
-  {name:"블루베리",r:18,color:"#3498db"},
-  {name:"키위",r:40,color:"#1abc9c"},
-  {name:"망고",r:44,color:"#e67e22"},
-  {name:"바나나",r:36,color:"#f39c12"},
-  {name:"라임",r:34,color:"#2ecc71"},
-  {name:"체리2",r:12,color:"#d32f2f"},
-  {name:"딸기2",r:20,color:"#e91e63"},
-  {name:"포도2",r:26,color:"#8e44ad"},
-  {name:"수박2",r:68,color:"#27ae60"}
-];
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const startBtn = document.getElementById("startBtn");
+    const scoreboard = document.getElementById("scoreboard");
 
-const BASE_GRAV=0.4,SUBSTEPS=4,RESTITUTION=0.25,FRICTION=0.96,MERGE_HOLD_TIME=0.15,MERGE_DISTANCE_FACTOR=0.9;
+    let gameRunning = false;
+    let fruits = [];
+    let dropping = null;
+    let mouseX = canvas.width / 2;
+    let score = 0;
+    let highScore = parseInt(localStorage.getItem("highScore") || "0");
 
-let fruits=[],current=null,mouseX=W/2,running=false;
-const contactTimers=new Map();
+    const fruitTypes = [
+      { name: "체리", color: "#ff4d6d", r: 12, gravity: 0.25, score: 1 },
+      { name: "딸기", color: "#ff6384", r: 18, gravity: 0.3, score: 2 },
+      { name: "포도", color: "#a855f7", r: 26, gravity: 0.35, score: 4 },
+      { name: "사과", color: "#ef4444", r: 35, gravity: 0.4, score: 8 },
+      { name: "레몬", color: "#fde047", r: 45, gravity: 0.45, score: 16 },
+      { name: "멜론", color: "#86efac", r: 55, gravity: 0.5, score: 32 },
+      { name: "수박", color: "#16a34a", r: 65, gravity: 0.55, score: 64 },
+      { name: "파인", color: "#facc15", r: 75, gravity: 0.6, score: 100 },
+      { name: "복숭아", color: "#fb7185", r: 85, gravity: 0.65, score: 200 },
+      { name: "망고", color: "#fbbf24", r: 95, gravity: 0.7, score: 400 },
+      { name: "용과", color: "#ec4899", r: 110, gravity: 0.75, score: 800 },
+      { name: "두리안", color: "#84cc16", r: 130, gravity: 0.8, score: 1600 }
+    ];
 
-// 마우스 조준
-canvas.addEventListener("mousemove",e=>{const r=canvas.getBoundingClientRect();mouseX=(e.clientX-r.left)*(W/r.width);});
-// 드롭
-canvas.addEventListener("click",()=>{if(!running||!current)return;fruits.push(current);current=null;});
+    class Fruit {
+      constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.r = type.r;
+        this.dy = 0;
+      }
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.fillStyle = this.type.color;
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = "#000";
+        ctx.font = "bold 14px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(fruitTypes.indexOf(this.type) + 1, this.x, this.y + 5);
+      }
+      update() {
+        this.dy += this.type.gravity;
+        this.y += this.dy;
 
-// 시작 버튼
-document.getElementById("startBtn").onclick=()=>{
-  running=true;
-  document.getElementById("startBtn").style.display="none";
-  spawnFruit();
-  requestAnimationFrame(loop);
-};
+        if (this.y + this.r > canvas.height) {
+          this.y = canvas.height - this.r;
+          this.dy *= -0.3;
+        }
 
-// 과일 생성
-function makeFruit(level,x=null,y=null){
-  const t=TYPES[level];
-  return {id:Date.now()+Math.random(),level,r:t.r,color:t.color,x:x??mouseX,y:y??100,vx:0,vy:0,mass:t.r*t.r/300,toRemove:false};
-}
-function spawnFruit(){current=makeFruit(0);} // 항상 체리부터 시작
-
-// 물리 업데이트
-function updatePhysics(dt){
-  const subDt=dt/SUBSTEPS;
-  const seenKeys=new Set();
-  for(let s=0;s<SUBSTEPS;s++){
-    for(const f of fruits){
-      f.vy+=BASE_GRAV*(1+(f.r/64)*9)*subDt;
-      f.x+=f.vx*subDt*60;
-      f.y+=f.vy*subDt*60;
-      f.vx*=FRICTION; f.vy*=FRICTION;
-      if(f.y+f.r>H){f.y=H-f.r;f.vy*=-RESTITUTION;}
-      if(f.x-f.r<0){f.x=f.r;f.vx*=-RESTITUTION;}
-      if(f.x+f.r>W){f.x=W-f.r;f.vx*=-RESTITUTION;}
+        if (this.x - this.r < 0) this.x = this.r;
+        if (this.x + this.r > canvas.width) this.x = canvas.width - this.r;
+      }
     }
-    for(let i=0;i<fruits.length;i++){
-      for(let j=i+1;j<fruits.length;j++){
-        const a=fruits[i],b=fruits[j];
-        const dx=a.x-b.x,dy=a.y-b.y;
-        const dist=Math.sqrt(dx*dx+dy*dy);
-        if(dist===0) continue;
-        const overlap=a.r+b.r-dist;
-        if(overlap>0){
-          const nx=dx/dist,ny=dy/dist;
-          const total=a.mass+b.mass;
-          a.x+=nx*(overlap*(b.mass/total)); a.y+=ny*(overlap*(b.mass/total));
-          b.x-=nx*(overlap*(a.mass/total)); b.y-=ny*(overlap*(a.mass/total));
-          const rvx=b.vx-a.vx,rvy=b.vy-a.vy;
-          const relVel=rvx*nx+rvy*ny;
-          if(relVel<0){
-            const impulse=-(1+RESTITUTION)*relVel/(1/a.mass+1/b.mass);
-            const ix=impulse*nx,iy=impulse*ny;
-            a.vx-=ix/a.mass;a.vy-=iy/a.mass;b.vx+=ix/b.mass;b.vy+=iy/b.mass;
-          }
-          const key=i<j?`${i}_${j}`:`${j}_${i}`;
-          seenKeys.add(key);
-          const prev=contactTimers.get(key)||0;
-          contactTimers.set(key,prev+subDt*60);
-          if(a.level===b.level && dist<(a.r+b.r)*MERGE_DISTANCE_FACTOR){
-            if(contactTimers.get(key)>MERGE_HOLD_TIME){
-              mergeFruits(i,j);
-              contactTimers.delete(key);
+
+    function spawnNewFruit() {
+      const rand = Math.random() < 0.9 ? 0 : 1; 
+      dropping = new Fruit(mouseX, 100, fruitTypes[rand]);
+    }
+
+    canvas.addEventListener("mousemove", e => {
+      const rect = canvas.getBoundingClientRect();
+      mouseX = e.clientX - rect.left;
+      if (dropping) dropping.x = mouseX;
+    });
+
+    canvas.addEventListener("click", () => {
+      if (!gameRunning || !dropping) return;
+      fruits.push(dropping);
+      dropping = null;
+      setTimeout(spawnNewFruit, 500);
+    });
+
+    function resetGame() {
+      fruits = [];
+      dropping = null;
+      score = 0;
+      gameRunning = true;
+      startBtn.style.display = "none";
+      spawnNewFruit();
+      requestAnimationFrame(loop);
+    }
+
+    function updateScore(points) {
+      score += points;
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem("highScore", highScore);
+      }
+      scoreboard.innerHTML = `점수: ${score}<br>최고점수: ${highScore}`;
+    }
+
+    function checkCollision(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.hypot(dx, dy);
+      return dist < a.r + b.r;
+    }
+
+    function mergeFruits() {
+      for (let i = 0; i < fruits.length; i++) {
+        for (let j = i + 1; j < fruits.length; j++) {
+          const a = fruits[i], b = fruits[j];
+          if (a.type === b.type && checkCollision(a, b)) {
+            const idx = fruitTypes.indexOf(a.type);
+            if (idx < fruitTypes.length - 1) {
+              const nx = (a.x + b.x) / 2;
+              const ny = (a.y + b.y) / 2;
+              fruits.splice(j, 1);
+              fruits.splice(i, 1);
+              fruits.push(new Fruit(nx, ny, fruitTypes[idx + 1]));
+              updateScore(a.type.score);
             }
+            return;
           }
         }
       }
     }
-  }
-  for(const key of contactTimers.keys()){if(!seenKeys.has(key)) contactTimers.delete(key);}
-}
 
-// 합성 처리
-function mergeFruits(i,j){
-  const a=fruits[i],b=fruits[j];
-  if(!a||!b) return;
-  const nextLevel=Math.min(a.level+1,TYPES.length-1);
-  const nx=(a.x+b.x)/2,ny=(a.y+b.y)/2;
-  const nvx=(a.vx+b.vx)/2,nvy=(a.vy+b.vy)/2;
-  fruits[i]=makeFruit(nextLevel,nx,ny);
-  fruits[i].vx=nvx; fruits[i].vy=nvy;
-  fruits[j].toRemove=true;
-  score+=(a.r+b.r);
-  scoreEl.textContent=score;
-}
+    function loop() {
+      if (!gameRunning) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-// 그리기
-function draw(){
-  ctx.clearRect(0,0,W,H);
-  if(current){
-    current.x=Math.max(current.r,Math.min(W-current.r,mouseX));
-    ctx.beginPath(); ctx.arc(current.x,current.y,current.r,0,Math.PI*2); ctx.fillStyle=current.color; ctx.fill();
-    ctx.fillStyle="#fff"; ctx.font="12px bold"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(current.level+1,current.x,current.y);
-  }
-  for(const f of fruits){
-    ctx.beginPath(); ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
-    ctx.fillStyle=f.color; ctx.fill();
-    ctx.fillStyle="#fff"; ctx.font="12px bold"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(f.level+1,f.x,f.y);
-  }
-}
+      for (let f of fruits) f.update();
 
-// 게임오버
-function gameOver(){
-  running=false;
-  ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle="#fff"; ctx.font="32px bold"; ctx.fillText("게임 오버!",W/2-80,H/2);
-  ctx.font="20px bold"; ctx.fillText("점수: "+score,W/2-40,H/2+40);
-  if(score>high){high=score; localStorage.setItem("suika_high",score);}
-  highEl.textContent=high;
-  setTimeout(()=>location.reload(),2000);
-}
+      // 충돌 감속 (뚫기 방지)
+      for (let i = 0; i < fruits.length; i++) {
+        for (let j = i + 1; j < fruits.length; j++) {
+          const a = fruits[i], b = fruits[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const dist = Math.hypot(dx, dy);
+          const minDist = a.r + b.r;
+          if (dist < minDist) {
+            const overlap = (minDist - dist) / 2;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            a.x += nx * overlap;
+            a.y += ny * overlap;
+            b.x -= nx * overlap;
+            b.y -= ny * overlap;
+            a.dy *= 0.98;
+            b.dy *= 0.98;
+          }
+        }
+      }
 
-// 루프
-let last=0;
-function loop(ts){
-  if(!running) return;
-  const dt=(ts-last)/1000; last=ts;
-  updatePhysics(dt);
-  fruits=fruits.filter(f=>!f.toRemove);
-  draw();
-  if(!current) spawnFruit();
-  for(const f of fruits) if(f.y-f.r<0) gameOver();
-  requestAnimationFrame(loop);
-}
-</script>
+      mergeFruits();
+
+      for (let f of fruits) f.draw();
+      if (dropping) dropping.draw();
+
+      // ✅ 수정된 게임오버 조건: 화면 맨 위 닿으면 종료
+      if (fruits.some(f => f.y - f.r < 0)) {
+        gameRunning = false;
+        startBtn.style.display = "block";
+        startBtn.textContent = "💀 다시 시작";
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    startBtn.addEventListener("click", resetGame);
+    scoreboard.innerHTML = `점수: 0<br>최고점수: ${highScore}`;
+  </script>
 </body>
 </html>
