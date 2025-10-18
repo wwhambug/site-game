@@ -5,134 +5,100 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>수박 게임</title>
 <style>
-  body {
-    margin: 0;
-    background: linear-gradient(#aee1f9, #fff);
-    font-family: "Pretendard", sans-serif;
-    overflow: hidden;
-  }
-  canvas {
-    display: block;
-    margin: 20px auto;
-    background: #fff9ec;
-    border-radius: 12px;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.15);
-  }
-  #hud {
-    position: fixed;
-    top: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(255,255,255,0.8);
-    border-radius: 10px;
-    padding: 8px 16px;
-    text-align: center;
-    font-weight: 600;
-  }
-  #hud span { font-size: 18px; }
+body{margin:0;font-family:sans-serif;background:linear-gradient(#aee1f9,#fff);overflow:hidden;}
+canvas{display:block;margin:20px auto;background:#fff9ec;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,0.15);}
+#hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,0.8);border-radius:10px;padding:8px 16px;text-align:center;font-weight:600;}
+#hud span{font-size:18px;}
+#startBtn{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:12px 24px;font-size:18px;border:none;border-radius:8px;background:#fbbf24;color:#000;cursor:pointer;}
 </style>
 </head>
 <body>
-<div id="hud">
-  점수: <span id="score">0</span> ｜ 최고: <span id="high">0</span>
-</div>
+<div id="hud">점수: <span id="score">0</span> ｜ 최고: <span id="high">0</span></div>
+<button id="startBtn">게임 시작</button>
 <canvas id="c" width="420" height="660"></canvas>
 <script>
-const canvas = document.getElementById("c");
-const ctx = canvas.getContext("2d");
-const W = canvas.width, H = canvas.height;
+const canvas=document.getElementById("c"),ctx=canvas.getContext("2d");
+const W=canvas.width,H=canvas.height;
+const scoreEl=document.getElementById("score"),highEl=document.getElementById("high");
+let score=0,high=parseInt(localStorage.getItem("suika_high")||"0");highEl.textContent=high;
 
-const scoreEl = document.getElementById("score");
-const highEl = document.getElementById("high");
-let score = 0;
-let high = parseInt(localStorage.getItem("suika_high") || "0");
-highEl.textContent = high;
-
-// 과일 종류
-const TYPES = [
-  { name:"체리", r:10, color:"#ff4d4d" },
-  { name:"딸기", r:16, color:"#ff6b81" },
-  { name:"포도", r:22, color:"#9b59b6" },
-  { name:"사과", r:30, color:"#e74c3c" },
-  { name:"레몬", r:38, color:"#f9ca24" },
-  { name:"멜론", r:48, color:"#27ae60" },
-  { name:"수박", r:64, color:"#2ecc71" },
+const TYPES=[
+  {name:"체리",r:10,color:"#ff4d4d"},
+  {name:"딸기",r:16,color:"#ff6b81"},
+  {name:"포도",r:22,color:"#9b59b6"},
+  {name:"사과",r:30,color:"#e74c3c"},
+  {name:"레몬",r:38,color:"#f9ca24"},
+  {name:"멜론",r:48,color:"#27ae60"},
+  {name:"수박",r:64,color:"#2ecc71"},
+  {name:"파인애플",r:50,color:"#f1c40f"},
+  {name:"블루베리",r:18,color:"#3498db"},
+  {name:"키위",r:40,color:"#1abc9c"},
+  {name:"망고",r:44,color:"#e67e22"},
+  {name:"바나나",r:36,color:"#f39c12"},
+  {name:"라임",r:34,color:"#2ecc71"},
+  {name:"체리2",r:12,color:"#d32f2f"},
+  {name:"딸기2",r:20,color:"#e91e63"},
+  {name:"포도2",r:26,color:"#8e44ad"},
+  {name:"수박2",r:68,color:"#27ae60"}
 ];
 
-const BASE_GRAV = 0.25;
-const SUBSTEPS = 4;
-const RESTITUTION = 0.25;
-const FRICTION = 0.96;
-const MERGE_HOLD_TIME = 0.15;
-const MERGE_DISTANCE_FACTOR = 0.9;
+const BASE_GRAV=0.25,SUBSTEPS=4,RESTITUTION=0.25,FRICTION=0.96,MERGE_HOLD_TIME=0.15,MERGE_DISTANCE_FACTOR=0.9;
 
-let fruits = [];
-let current = null;
-let mouseX = W / 2;
-let running = true;
-const contactTimers = new Map();
+let fruits=[],current=null,mouseX=W/2,running=false;
+const contactTimers=new Map();
 
-canvas.addEventListener("mousemove", e=>{
-  const rect = canvas.getBoundingClientRect();
-  mouseX = e.clientX - rect.left;
-});
-canvas.addEventListener("click", ()=>{
-  if (!current) return;
-  fruits.push(current);
-  current = null;
-});
+// 마우스 조준
+canvas.addEventListener("mousemove",e=>{const r=canvas.getBoundingClientRect();mouseX=(e.clientX-r.left)*(W/r.width);});
+// 드롭
+canvas.addEventListener("click",()=>{if(!running||!current)return;fruits.push(current);current=null;});
 
+// 시작 버튼
+document.getElementById("startBtn").onclick=()=>{
+  running=true;
+  document.getElementById("startBtn").style.display="none";
+  spawnFruit();
+  requestAnimationFrame(loop);
+};
+
+// 과일 생성
 function makeFruit(level,x=null,y=null){
   const t=TYPES[level];
-  return { level,r:t.r,color:t.color,
-    x:x??mouseX,y:y??100,
-    vx:0,vy:0,mass:t.r*t.r/300,toRemove:false };
+  return {id:Date.now()+Math.random(),level,r:t.r,color:t.color,x:x??mouseX,y:y??100,vx:0,vy:0,mass:t.r*t.r/300,toRemove:false};
 }
+function spawnFruit(){current=makeFruit(Math.floor(Math.random()*7));}
 
-function spawnFruit(){
-  current = makeFruit(Math.floor(Math.random()*3));
-}
-
+// 물리 업데이트
 function updatePhysics(dt){
-  const subDt = dt/SUBSTEPS;
-  const seenKeys = new Set();
+  const subDt=dt/SUBSTEPS;
+  const seenKeys=new Set();
   for(let s=0;s<SUBSTEPS;s++){
-    // 중력
     for(const f of fruits){
-      f.vy += BASE_GRAV * (1 + (f.r/64)*9) * subDt;
-      f.x += f.vx * subDt*60;
-      f.y += f.vy * subDt*60;
-      f.vx *= FRICTION;
-      f.vy *= FRICTION;
-      if(f.y+f.r>H){
-        f.y=H-f.r;
-        f.vy*=-RESTITUTION;
-      }
-      if(f.x-f.r<0){ f.x=f.r; f.vx*=-RESTITUTION; }
-      if(f.x+f.r>W){ f.x=W-f.r; f.vx*=-RESTITUTION; }
+      f.vy+=BASE_GRAV*(1+(f.r/64)*9)*subDt;
+      f.x+=f.vx*subDt*60;
+      f.y+=f.vy*subDt*60;
+      f.vx*=FRICTION; f.vy*=FRICTION;
+      if(f.y+f.r>H){f.y=H-f.r;f.vy*=-RESTITUTION;}
+      if(f.x-f.r<0){f.x=f.r;f.vx*=-RESTITUTION;}
+      if(f.x+f.r>W){f.x=W-f.r;f.vx*=-RESTITUTION;}
     }
-    // 충돌
     for(let i=0;i<fruits.length;i++){
       for(let j=i+1;j<fruits.length;j++){
-        const a=fruits[i], b=fruits[j];
-        const dx=a.x-b.x, dy=a.y-b.y;
+        const a=fruits[i],b=fruits[j];
+        const dx=a.x-b.x,dy=a.y-b.y;
         const dist=Math.sqrt(dx*dx+dy*dy);
         if(dist===0) continue;
         const overlap=a.r+b.r-dist;
         if(overlap>0){
-          const nx=dx/dist, ny=dy/dist;
+          const nx=dx/dist,ny=dy/dist;
           const total=a.mass+b.mass;
-          a.x += nx*(overlap*(b.mass/total));
-          a.y += ny*(overlap*(b.mass/total));
-          b.x -= nx*(overlap*(a.mass/total));
-          b.y -= ny*(overlap*(a.mass/total));
-          const rvx=b.vx-a.vx, rvy=b.vy-a.vy;
+          a.x+=nx*(overlap*(b.mass/total)); a.y+=ny*(overlap*(b.mass/total));
+          b.x-=nx*(overlap*(a.mass/total)); b.y-=ny*(overlap*(a.mass/total));
+          const rvx=b.vx-a.vx,rvy=b.vy-a.vy;
           const relVel=rvx*nx+rvy*ny;
           if(relVel<0){
             const impulse=-(1+RESTITUTION)*relVel/(1/a.mass+1/b.mass);
-            const ix=impulse*nx, iy=impulse*ny;
-            a.vx-=ix/a.mass; a.vy-=iy/a.mass;
-            b.vx+=ix/b.mass; b.vy+=iy/b.mass;
+            const ix=impulse*nx,iy=impulse*ny;
+            a.vx-=ix/a.mass;a.vy-=iy/a.mass;b.vx+=ix/b.mass;b.vy+=iy/b.mass;
           }
           const key=i<j?`${i}_${j}`:`${j}_${i}`;
           seenKeys.add(key);
@@ -148,46 +114,49 @@ function updatePhysics(dt){
       }
     }
   }
-  for(const key of contactTimers.keys()){
-    if(!seenKeys.has(key)) contactTimers.delete(key);
-  }
+  for(const key of contactTimers.keys()){if(!seenKeys.has(key)) contactTimers.delete(key);}
 }
 
+// 합성 처리
 function mergeFruits(i,j){
-  const a=fruits[i], b=fruits[j];
+  const a=fruits[i],b=fruits[j];
   if(!a||!b) return;
-  const nextLevel=a.level+1;
-  const nx=(a.x+b.x)/2, ny=(a.y+b.y)/2;
-  const nvx=(a.vx+b.vx)/2, nvy=(a.vy+b.vy)/2;
-  fruits[i]=makeFruit(Math.min(nextLevel,TYPES.length-1),nx,ny);
+  const nextLevel=Math.min(a.level+1,TYPES.length-1);
+  const nx=(a.x+b.x)/2,ny=(a.y+b.y)/2;
+  const nvx=(a.vx+b.vx)/2,nvy=(a.vy+b.vy)/2;
+  fruits[i]=makeFruit(nextLevel,nx,ny);
   fruits[i].vx=nvx; fruits[i].vy=nvy;
   fruits[j].toRemove=true;
-  score += (a.r+b.r);
+  score+=(a.r+b.r);
   scoreEl.textContent=score;
 }
 
+// 그리기
 function draw(){
   ctx.clearRect(0,0,W,H);
   if(current){
-    current.x = clamp(mouseX,current.r,W-current.r);
-    ctx.beginPath();
-    ctx.arc(current.x,current.y,current.r,0,Math.PI*2);
-    ctx.fillStyle=current.color;
-    ctx.fill();
+    current.x=Math.max(current.r,Math.min(W-current.r,mouseX));
+    ctx.beginPath(); ctx.arc(current.x,current.y,current.r,0,Math.PI*2); ctx.fillStyle=current.color; ctx.fill();
   }
-  for(const f of fruits){
-    ctx.beginPath();
-    ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
-    ctx.fillStyle=f.color;
-    ctx.fill();
-  }
+  for(const f of fruits){ctx.beginPath(); ctx.arc(f.x,f.y,f.r,0,Math.PI*2); ctx.fillStyle=f.color; ctx.fill();}
 }
 
+// 게임오버
+function gameOver(){
+  running=false;
+  ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#fff"; ctx.font="32px bold"; ctx.fillText("게임 오버!",W/2-80,H/2);
+  ctx.font="20px bold"; ctx.fillText("점수: "+score,W/2-40,H/2+40);
+  if(score>high){high=score; localStorage.setItem("suika_high",score);}
+  highEl.textContent=high;
+  setTimeout(()=>location.reload(),2000);
+}
+
+// 루프
 let last=0;
 function loop(ts){
   if(!running) return;
-  const dt=(ts-last)/1000;
-  last=ts;
+  const dt=(ts-last)/1000; last=ts;
   updatePhysics(dt);
   fruits=fruits.filter(f=>!f.toRemove);
   draw();
@@ -195,26 +164,6 @@ function loop(ts){
   for(const f of fruits) if(f.y-f.r<0) gameOver();
   requestAnimationFrame(loop);
 }
-
-function gameOver(){
-  running=false;
-  ctx.fillStyle="rgba(0,0,0,0.5)";
-  ctx.fillRect(0,0,W,H);
-  ctx.fillStyle="#fff";
-  ctx.font="32px bold";
-  ctx.fillText("게임 오버!",W/2-80,H/2);
-  ctx.font="20px bold";
-  ctx.fillText("점수: "+score,W/2-40,H/2+40);
-  if(score>high){
-    high=score;
-    localStorage.setItem("suika_high",score);
-  }
-  highEl.textContent=high;
-  setTimeout(()=>location.reload(),2000);
-}
-
-spawnFruit();
-requestAnimationFrame(loop);
 </script>
 </body>
 </html>
