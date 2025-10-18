@@ -1,225 +1,212 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>수박 게임 🍉</title>
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: #fffbe6;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      font-family: sans-serif;
-      user-select: none;
-    }
-    canvas {
-      background: #fef3c7;
-      border: 5px solid #fcd34d;
-      border-radius: 10px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-    }
-    #startBtn {
-      position: absolute;
-      padding: 10px 28px;
-      font-size: 20px;
-      background: #fcd34d;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: 0.2s;
-    }
-    #startBtn:hover { background: #fde047; }
-    #scoreboard {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      font-size: 18px;
-      background: rgba(255,255,255,0.6);
-      padding: 8px 12px;
-      border-radius: 6px;
-    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#fef6e4; display:flex; flex-direction:column; align-items:center; font-family:sans-serif; }
+    h1 { margin:10px 0; }
+    canvas { background:#d8f3dc; border:3px solid #40916c; border-radius:10px; }
+    #scoreBoard { font-size:20px; margin:10px; }
   </style>
 </head>
 <body>
-  <button id="startBtn">🍉 게임 시작</button>
-  <div id="scoreboard">점수: 0<br>최고점수: 0</div>
-  <canvas id="gameCanvas" width="400" height="600"></canvas>
+  <h1>🍒 수박 게임 🍉</h1>
+  <div id="scoreBoard">점수: 0 | 최고점수: 0</div>
+  <canvas id="game" width="400" height="600"></canvas>
 
   <script>
-    const canvas = document.getElementById("gameCanvas");
+    const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
-    const startBtn = document.getElementById("startBtn");
-    const scoreboard = document.getElementById("scoreboard");
+    const scoreBoard = document.getElementById("scoreBoard");
 
-    let gameRunning = false;
-    let fruits = [];
-    let dropping = null;
-    let mouseX = canvas.width / 2;
-    let score = 0;
-    let highScore = parseInt(localStorage.getItem("highScore") || "0");
-
-    const fruitTypes = [
-      { name: "체리", color: "#ff4d6d", r: 12, gravity: 0.25, score: 1 },
-      { name: "딸기", color: "#ff6384", r: 18, gravity: 0.3, score: 2 },
-      { name: "포도", color: "#a855f7", r: 26, gravity: 0.35, score: 4 },
-      { name: "사과", color: "#ef4444", r: 35, gravity: 0.4, score: 8 },
-      { name: "레몬", color: "#fde047", r: 45, gravity: 0.45, score: 16 },
-      { name: "멜론", color: "#86efac", r: 55, gravity: 0.5, score: 32 },
-      { name: "수박", color: "#16a34a", r: 65, gravity: 0.55, score: 64 },
-      { name: "파인", color: "#facc15", r: 75, gravity: 0.6, score: 100 },
-      { name: "복숭아", color: "#fb7185", r: 85, gravity: 0.65, score: 200 },
-      { name: "망고", color: "#fbbf24", r: 95, gravity: 0.7, score: 400 },
-      { name: "용과", color: "#ec4899", r: 110, gravity: 0.75, score: 800 },
-      { name: "두리안", color: "#84cc16", r: 130, gravity: 0.8, score: 1600 }
+    // 과일 목록 (작을수록 가볍고, 클수록 무거움)
+    const fruits = [
+      {color:"#ff4d6d", radius:15, name:"체리"},
+      {color:"#ff7096", radius:20, name:"딸기"},
+      {color:"#9d4edd", radius:25, name:"포도"},
+      {color:"#ffb703", radius:30, name:"사과"},
+      {color:"#ffee32", radius:35, name:"레몬"},
+      {color:"#70e000", radius:45, name:"멜론"},
+      {color:"#008000", radius:55, name:"수박"},
+      {color:"#a3c4f3", radius:65, name:"블루베리"},
+      {color:"#e5989b", radius:75, name:"복숭아"},
+      {color:"#cdb4db", radius:85, name:"자두"},
+      {color:"#6a994e", radius:95, name:"참외"},
+      {color:"#8ecae6", radius:105, name:"망고"},
+      {color:"#f28482", radius:115, name:"자몽"},
+      {color:"#d00000", radius:130, name:"석류"},
+      {color:"#ffba08", radius:150, name:"황금수박"}
     ];
 
-    class Fruit {
-      constructor(x, y, type) {
-        this.x = x;
-        this.y = y;
-        this.type = type;
-        this.r = type.r;
-        this.dy = 0;
-      }
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-        ctx.fillStyle = this.type.color;
-        ctx.fill();
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.fillStyle = "#000";
-        ctx.font = "bold 14px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(fruitTypes.indexOf(this.type) + 1, this.x, this.y + 5);
-      }
-      update() {
-        this.dy += this.type.gravity;
-        this.y += this.dy;
+    let objects = [];
+    let dropping = null;
+    let score = 0;
+    let highScore = Number(localStorage.getItem("highScore") || 0);
+    let gameOver = false;
 
-        if (this.y + this.r > canvas.height) {
-          this.y = canvas.height - this.r;
-          this.dy *= -0.3;
-        }
-
-        if (this.x - this.r < 0) this.x = this.r;
-        if (this.x + this.r > canvas.width) this.x = canvas.width - this.r;
-      }
+    function randomFruit() {
+      return {...fruits[0], type:0}; // 체리부터 시작
     }
 
-    function spawnNewFruit() {
-      const rand = Math.random() < 0.9 ? 0 : 1; 
-      dropping = new Fruit(mouseX, 100, fruitTypes[rand]);
+    function dropFruit() {
+      if (dropping || gameOver) return;
+      dropping = randomFruit();
+      dropping.x = canvas.width / 2;
+      dropping.y = 60;
+      dropping.vx = 0;
+      dropping.vy = 0;
     }
 
-    canvas.addEventListener("mousemove", e => {
-      const rect = canvas.getBoundingClientRect();
-      mouseX = e.clientX - rect.left;
-      if (dropping) dropping.x = mouseX;
+    document.addEventListener("mousemove", e => {
+      if (dropping) {
+        const rect = canvas.getBoundingClientRect();
+        dropping.x = e.clientX - rect.left;
+      }
     });
 
-    canvas.addEventListener("click", () => {
-      if (!gameRunning || !dropping) return;
-      fruits.push(dropping);
+    document.addEventListener("click", () => {
+      if (!dropping || gameOver) return;
+      objects.push(dropping);
       dropping = null;
-      setTimeout(spawnNewFruit, 500);
+      dropFruit();
     });
 
-    function resetGame() {
-      fruits = [];
-      dropping = null;
-      score = 0;
-      gameRunning = true;
-      startBtn.style.display = "none";
-      spawnNewFruit();
-      requestAnimationFrame(loop);
-    }
+    function update() {
+      if (gameOver) return;
 
-    function updateScore(points) {
-      score += points;
-      if (score > highScore) {
-        highScore = score;
-        localStorage.setItem("highScore", highScore);
-      }
-      scoreboard.innerHTML = `점수: ${score}<br>최고점수: ${highScore}`;
-    }
+      // 과일 중력/이동 처리
+      for (let o of objects) {
+        const weight = 0.05 + o.radius / 200; // 클수록 무겁게
+        o.vy += weight * 3; // 중력
+        o.y += o.vy;
+        o.x += o.vx;
+        o.vx *= 0.98; // 공기저항
 
-    function checkCollision(a, b) {
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
-      const dist = Math.hypot(dx, dy);
-      return dist < a.r + b.r;
-    }
+        // 바닥 충돌
+        if (o.y + o.radius > canvas.height) {
+          o.y = canvas.height - o.radius;
+          o.vy *= -0.3; // 튕김
+          o.vx *= 0.7; // 무거울수록 덜 움직임
+          if (Math.abs(o.vy) < 0.5) o.vy = 0;
+        }
 
-    function mergeFruits() {
-      for (let i = 0; i < fruits.length; i++) {
-        for (let j = i + 1; j < fruits.length; j++) {
-          const a = fruits[i], b = fruits[j];
-          if (a.type === b.type && checkCollision(a, b)) {
-            const idx = fruitTypes.indexOf(a.type);
-            if (idx < fruitTypes.length - 1) {
-              const nx = (a.x + b.x) / 2;
-              const ny = (a.y + b.y) / 2;
-              fruits.splice(j, 1);
-              fruits.splice(i, 1);
-              fruits.push(new Fruit(nx, ny, fruitTypes[idx + 1]));
-              updateScore(a.type.score);
-            }
-            return;
-          }
+        // 벽 충돌
+        if (o.x - o.radius < 0 || o.x + o.radius > canvas.width) {
+          o.vx *= -0.8;
+          o.x = Math.max(o.radius, Math.min(canvas.width - o.radius, o.x));
         }
       }
-    }
 
-    function loop() {
-      if (!gameRunning) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      for (let f of fruits) f.update();
-
-      // 충돌 감속 (뚫기 방지)
-      for (let i = 0; i < fruits.length; i++) {
-        for (let j = i + 1; j < fruits.length; j++) {
-          const a = fruits[i], b = fruits[j];
+      // 충돌 처리 (항상 확인)
+      for (let i = 0; i < objects.length; i++) {
+        for (let j = i + 1; j < objects.length; j++) {
+          const a = objects[i];
+          const b = objects[j];
           const dx = a.x - b.x;
           const dy = a.y - b.y;
-          const dist = Math.hypot(dx, dy);
-          const minDist = a.r + b.r;
-          if (dist < minDist) {
-            const overlap = (minDist - dist) / 2;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < a.radius + b.radius) {
+            // 서로 미는 물리 효과
+            const overlap = (a.radius + b.radius - dist) / 2;
             const nx = dx / dist;
             const ny = dy / dist;
             a.x += nx * overlap;
             a.y += ny * overlap;
             b.x -= nx * overlap;
             b.y -= ny * overlap;
-            a.dy *= 0.98;
-            b.dy *= 0.98;
+
+            // 충돌 후 합성
+            if (Math.abs(a.vy - b.vy) < 2 && a.type === b.type && a.type < fruits.length - 1) {
+              const next = fruits[a.type + 1];
+              objects.splice(j, 1);
+              objects.splice(i, 1);
+              const newFruit = {...next, x:(a.x+b.x)/2, y:(a.y+b.y)/2, vx:0, vy:-5, type:a.type+1};
+              objects.push(newFruit);
+              score += (a.type + 1) * 10;
+              updateScore();
+              break;
+            }
           }
         }
       }
 
-      mergeFruits();
-
-      for (let f of fruits) f.draw();
-      if (dropping) dropping.draw();
-
-      // ✅ 수정된 게임오버 조건: 화면 맨 위 닿으면 종료
-      if (fruits.some(f => f.y - f.r < 0)) {
-        gameRunning = false;
-        startBtn.style.display = "block";
-        startBtn.textContent = "💀 다시 시작";
+      // 게임오버 판정 (높이)
+      for (let o of objects) {
+        if (o.y - o.radius < 50) {
+          endGame();
+          return;
+        }
       }
+    }
 
+    function updateScore() {
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem("highScore", highScore);
+      }
+      scoreBoard.innerText = `점수: ${score} | 최고점수: ${highScore}`;
+    }
+
+    function endGame() {
+      gameOver = true;
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#fff";
+      ctx.font = "32px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("게임 오버!", canvas.width/2, canvas.height/2);
+      ctx.font = "20px sans-serif";
+      ctx.fillText("클릭하면 다시 시작", canvas.width/2, canvas.height/2 + 40);
+
+      document.addEventListener("click", resetGame, {once:true});
+    }
+
+    function resetGame() {
+      objects = [];
+      dropping = null;
+      score = 0;
+      gameOver = false;
+      updateScore();
+      dropFruit();
+    }
+
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // 드롭 중 과일
+      if (dropping) {
+        ctx.fillStyle = dropping.color;
+        ctx.beginPath();
+        ctx.arc(dropping.x, dropping.y, dropping.radius, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.font = "12px bold sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(dropping.type ?? 0, dropping.x, dropping.y+4);
+      }
+      // 떨어진 과일
+      for (let o of objects) {
+        ctx.fillStyle = o.color;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, o.radius, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.font = "12px bold sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(o.type ?? 0, o.x, o.y+4);
+      }
+    }
+
+    function loop() {
+      update();
+      draw();
       requestAnimationFrame(loop);
     }
 
-    startBtn.addEventListener("click", resetGame);
-    scoreboard.innerHTML = `점수: 0<br>최고점수: ${highScore}`;
+    updateScore();
+    dropFruit();
+    loop();
   </script>
 </body>
 </html>
