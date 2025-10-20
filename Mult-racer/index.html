@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pixel Racer</title>
+  <title>Pixel Racer - Multiplayer</title>
   <style>
     body {
       margin: 0;
@@ -45,6 +45,17 @@
       padding: 10px 20px;
       border-radius: 10px;
     }
+    #winMsg {
+      position: absolute;
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #000a;
+      padding: 30px;
+      border-radius: 15px;
+      display: none;
+      font-size: 2em;
+    }
   </style>
 </head>
 <body>
@@ -54,15 +65,16 @@
     <button id="startBtn">시작</button>
   </div>
 
+  <div id="winMsg">🏁 승리!</div>
   <canvas id="gameCanvas"></canvas>
+
   <div id="mobileControls">
     <button class="btn" id="leftBtn">⬅</button>
-    <button class="btn" id="upBtn">⬆</button>
-    <button class="btn" id="downBtn">⬇</button>
     <button class="btn" id="rightBtn">➡</button>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/seedrandom"></script>
   <script>
     const supabaseUrl = "https://falkihlzhrqugefjkqvt.supabase.co";
     const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhbGtpaGx6aHJxdWdlZmprcXZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA4NzY3NTIsImV4cCI6MjA3NjQ1Mjc1Mn0.XS7cqVEPxHdA-JP25WWj75tUHhJEw_A8Zj_Q4wKRjq8";
@@ -74,44 +86,58 @@
     canvas.height = innerHeight;
 
     const mobileControls = document.getElementById("mobileControls");
-    if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
-      mobileControls.style.display = "flex";
-    }
+    if (/Android|iPhone|iPad/i.test(navigator.userAgent)) mobileControls.style.display = "flex";
 
     let nickname = "";
-    let player = { x: 200, y: 200, w: 40, h: 20, speed: 5 };
+    let player = { x: canvas.width / 2 - 20, y: canvas.height - 80, w: 40, h: 20, speed: 6 };
     let others = {};
     let obstacles = [];
+    let scrollY = 0;
     let gameStarted = false;
+    let goalY = -4000; // 결승선 위치 (모두 동일)
+    let won = false;
 
     document.getElementById("startBtn").onclick = async () => {
       nickname = document.getElementById("nickname").value.trim();
       if (!nickname) return alert("닉네임을 입력하세요!");
       document.getElementById("nicknameBox").style.display = "none";
       canvas.style.display = "block";
+      await setupSeed();
       await joinGame();
-      spawnObstacles();
+      generateMap();
       startGame();
     };
 
+    // === Supabase에서 seed 가져오기 ===
+    let mapSeed = "";
+    async function setupSeed() {
+      const { data } = await supabase.from("map").select("*").limit(1);
+      if (data && data.length > 0) {
+        mapSeed = data[0].seed;
+      } else {
+        mapSeed = Math.random().toString(36).substring(2, 10);
+        await supabase.from("map").insert([{ seed: mapSeed }]);
+      }
+      Math.seedrandom(mapSeed);
+    }
+
+    // === join / update ===
     async function joinGame() {
       await supabase.from("players").delete().eq("name", nickname);
       await supabase.from("players").insert([{ name: nickname, x: player.x, y: player.y }]);
     }
 
     async function updatePosition() {
-      await supabase.from("players").update({ x: player.x, y: player.y }).eq("name", nickname);
+      await supabase.from("players").update({ x: player.x, y: scrollY }).eq("name", nickname);
     }
 
-    function spawnObstacles() {
+    // === 맵 생성 ===
+    function generateMap() {
       obstacles = [];
-      for (let i = 0; i < 10; i++) {
-        obstacles.push({
-          x: Math.random() * (canvas.width - 50),
-          y: Math.random() * (canvas.height - 50),
-          w: 40,
-          h: 40
-        });
+      for (let i = 0; i < 60; i++) {
+        const ox = Math.random() * (canvas.width - 60);
+        const oy = -i * 100 - 200;
+        obstacles.push({ x: ox, y: oy, w: 60, h: 30 });
       }
     }
 
@@ -119,10 +145,14 @@
       ctx.fillStyle = "#222";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+      // 결승선
+      ctx.fillStyle = "gold";
+      ctx.fillRect(0, goalY + scrollY, canvas.width, 10);
+
       // 장애물
       ctx.fillStyle = "#888";
       for (const o of obstacles) {
-        ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.fillRect(o.x, o.y + scrollY, o.w, o.h);
       }
 
       // 내 차
@@ -134,71 +164,73 @@
       for (const name in others) {
         const p = others[name];
         ctx.fillStyle = "red";
-        ctx.fillRect(p.x, p.y, 40, 20);
-        ctx.fillText(name, p.x, p.y - 5);
+        const py = canvas.height - 80 - (scrollY - p.y);
+        ctx.fillRect(p.x, py, 40, 20);
+        ctx.fillText(name, p.x, py - 5);
       }
     }
 
-    function checkCollision(nx, ny) {
+    function checkCollision() {
       for (const o of obstacles) {
-        if (nx < o.x + o.w && nx + player.w > o.x &&
-            ny < o.y + o.h && ny + player.h > o.y) {
+        const oy = o.y + scrollY;
+        if (player.x < o.x + o.w && player.x + player.w > o.x &&
+            player.y < oy + o.h && player.y + player.h > oy) {
           return true;
         }
       }
       return false;
     }
 
-    function startGame() {
+    async function startGame() {
       gameStarted = true;
-      requestAnimationFrame(loop);
+      loop();
     }
 
     async function loop() {
-      draw();
-      requestAnimationFrame(loop);
+      if (!won) {
+        scrollY += 2;
+        if (checkCollision()) {
+          ctx.fillStyle = "red";
+          ctx.font = "30px sans-serif";
+          ctx.fillText("💥 충돌!", canvas.width / 2 - 50, canvas.height / 2);
+          requestAnimationFrame(loop);
+          return;
+        }
+        if (scrollY + goalY > player.y - 100 && !won) {
+          won = true;
+          document.getElementById("winMsg").style.display = "block";
+          await supabase.from("winners").insert([{ name: nickname }]);
+        }
+        draw();
+        requestAnimationFrame(loop);
+      }
     }
 
-    // 키보드 이동
+    // === 이동 (좌우) ===
     document.addEventListener("keydown", async (e) => {
-      if (!gameStarted) return;
-      let nx = player.x, ny = player.y;
+      if (!gameStarted || won) return;
       const s = player.speed;
-      if (e.key === "ArrowUp") ny -= s;
-      if (e.key === "ArrowDown") ny += s;
-      if (e.key === "ArrowLeft") nx -= s;
-      if (e.key === "ArrowRight") nx += s;
-      if (!checkCollision(nx, ny)) {
-        player.x = nx; player.y = ny;
-        updatePosition();
-      }
+      if (e.key === "ArrowLeft") player.x -= s;
+      if (e.key === "ArrowRight") player.x += s;
+      player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+      updatePosition();
     });
 
-    // 모바일 터치 이동
-    const moveDir = { up: false, down: false, left: false, right: false };
-    document.getElementById("upBtn").onpointerdown = () => moveDir.up = true;
-    document.getElementById("downBtn").onpointerdown = () => moveDir.down = true;
-    document.getElementById("leftBtn").onpointerdown = () => moveDir.left = true;
-    document.getElementById("rightBtn").onpointerdown = () => moveDir.right = true;
-    document.querySelectorAll(".btn").forEach(btn =>
-      btn.onpointerup = () => moveDir.up = moveDir.down = moveDir.left = moveDir.right = false
-    );
+    // === 모바일 이동 ===
+    document.getElementById("leftBtn").onpointerdown = () => moveLeft();
+    document.getElementById("rightBtn").onpointerdown = () => moveRight();
+    function moveLeft() {
+      player.x -= player.speed * 2;
+      player.x = Math.max(0, player.x);
+      updatePosition();
+    }
+    function moveRight() {
+      player.x += player.speed * 2;
+      player.x = Math.min(canvas.width - player.w, player.x);
+      updatePosition();
+    }
 
-    setInterval(() => {
-      if (!gameStarted) return;
-      let nx = player.x, ny = player.y;
-      const s = player.speed;
-      if (moveDir.up) ny -= s;
-      if (moveDir.down) ny += s;
-      if (moveDir.left) nx -= s;
-      if (moveDir.right) nx += s;
-      if (!checkCollision(nx, ny)) {
-        player.x = nx; player.y = ny;
-        updatePosition();
-      }
-    }, 50);
-
-    // 실시간 반영
+    // === 다른 플레이어 실시간 반영 ===
     supabase.channel("realtime:players")
       .on("postgres_changes", { event: "*", schema: "public", table: "players" }, (payload) => {
         if (payload.new.name === nickname) return;
