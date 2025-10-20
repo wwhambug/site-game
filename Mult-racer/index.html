@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pixel Racer</title>
   <style>
     body {
       margin: 0;
-      background: #111;
       overflow: hidden;
+      background: #111;
+      color: #fff;
       font-family: sans-serif;
-      color: white;
-      text-align: center;
+      touch-action: none;
     }
     #nicknameBox {
       position: absolute;
@@ -21,101 +21,190 @@
       background: #222;
       padding: 20px;
       border-radius: 10px;
-      box-shadow: 0 0 20px rgba(0,0,0,0.5);
+      text-align: center;
     }
     #gameCanvas {
       display: none;
-      background: #333;
       width: 100vw;
       height: 100vh;
+      background: #222;
+    }
+    #mobileControls {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      gap: 15px;
+    }
+    .btn {
+      background: #444;
+      color: white;
+      font-size: 24px;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 10px;
     }
   </style>
 </head>
 <body>
   <div id="nicknameBox">
-    <h2>닉네임을 입력하세요 🚗</h2>
-    <input type="text" id="nickname" placeholder="닉네임" />
+    <h2>닉네임 입력 🚗</h2>
+    <input type="text" id="nickname" placeholder="닉네임">
     <button id="startBtn">시작</button>
   </div>
+
   <canvas id="gameCanvas"></canvas>
+  <div id="mobileControls">
+    <button class="btn" id="leftBtn">⬅</button>
+    <button class="btn" id="upBtn">⬆</button>
+    <button class="btn" id="downBtn">⬇</button>
+    <button class="btn" id="rightBtn">➡</button>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    // Supabase 연결 (여기 꼭 따옴표!)
     const supabaseUrl = "https://falkihlzhrqugefjkqvt.supabase.co";
     const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhbGtpaGx6aHJxdWdlZmprcXZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA4NzY3NTIsImV4cCI6MjA3NjQ1Mjc1Mn0.XS7cqVEPxHdA-JP25WWj75tUHhJEw_A8Zj_Q4wKRjq8";
     const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
-
-    let nickname = "";
-    let x = 100, y = 100;
-    let others = {};
 
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     canvas.width = innerWidth;
     canvas.height = innerHeight;
 
-    // 닉네임 입력 후 시작
+    const mobileControls = document.getElementById("mobileControls");
+    if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      mobileControls.style.display = "flex";
+    }
+
+    let nickname = "";
+    let player = { x: 200, y: 200, w: 40, h: 20, speed: 5 };
+    let others = {};
+    let obstacles = [];
+    let gameStarted = false;
+
     document.getElementById("startBtn").onclick = async () => {
       nickname = document.getElementById("nickname").value.trim();
       if (!nickname) return alert("닉네임을 입력하세요!");
       document.getElementById("nicknameBox").style.display = "none";
       canvas.style.display = "block";
       await joinGame();
+      spawnObstacles();
       startGame();
     };
 
-    // DB에 내 정보 넣기
     async function joinGame() {
-      // 같은 닉네임 있으면 삭제 후 다시 추가
       await supabase.from("players").delete().eq("name", nickname);
-      await supabase.from("players").insert([{ name: nickname, x, y }]);
+      await supabase.from("players").insert([{ name: nickname, x: player.x, y: player.y }]);
+    }
+
+    async function updatePosition() {
+      await supabase.from("players").update({ x: player.x, y: player.y }).eq("name", nickname);
+    }
+
+    function spawnObstacles() {
+      obstacles = [];
+      for (let i = 0; i < 10; i++) {
+        obstacles.push({
+          x: Math.random() * (canvas.width - 50),
+          y: Math.random() * (canvas.height - 50),
+          w: 40,
+          h: 40
+        });
+      }
+    }
+
+    function draw() {
+      ctx.fillStyle = "#222";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 장애물
+      ctx.fillStyle = "#888";
+      for (const o of obstacles) {
+        ctx.fillRect(o.x, o.y, o.w, o.h);
+      }
+
+      // 내 차
+      ctx.fillStyle = "lime";
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+      ctx.fillText(nickname, player.x, player.y - 5);
+
+      // 다른 플레이어
+      for (const name in others) {
+        const p = others[name];
+        ctx.fillStyle = "red";
+        ctx.fillRect(p.x, p.y, 40, 20);
+        ctx.fillText(name, p.x, p.y - 5);
+      }
+    }
+
+    function checkCollision(nx, ny) {
+      for (const o of obstacles) {
+        if (nx < o.x + o.w && nx + player.w > o.x &&
+            ny < o.y + o.h && ny + player.h > o.y) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function startGame() {
+      gameStarted = true;
+      requestAnimationFrame(loop);
+    }
+
+    async function loop() {
+      draw();
+      requestAnimationFrame(loop);
     }
 
     // 키보드 이동
     document.addEventListener("keydown", async (e) => {
-      const speed = 5;
-      if (e.key === "ArrowUp") y -= speed;
-      if (e.key === "ArrowDown") y += speed;
-      if (e.key === "ArrowLeft") x -= speed;
-      if (e.key === "ArrowRight") x += speed;
-      await supabase.from("players").update({ x, y }).eq("name", nickname);
+      if (!gameStarted) return;
+      let nx = player.x, ny = player.y;
+      const s = player.speed;
+      if (e.key === "ArrowUp") ny -= s;
+      if (e.key === "ArrowDown") ny += s;
+      if (e.key === "ArrowLeft") nx -= s;
+      if (e.key === "ArrowRight") nx += s;
+      if (!checkCollision(nx, ny)) {
+        player.x = nx; player.y = ny;
+        updatePosition();
+      }
     });
 
-    // 다른 플레이어 실시간 반영
+    // 모바일 터치 이동
+    const moveDir = { up: false, down: false, left: false, right: false };
+    document.getElementById("upBtn").onpointerdown = () => moveDir.up = true;
+    document.getElementById("downBtn").onpointerdown = () => moveDir.down = true;
+    document.getElementById("leftBtn").onpointerdown = () => moveDir.left = true;
+    document.getElementById("rightBtn").onpointerdown = () => moveDir.right = true;
+    document.querySelectorAll(".btn").forEach(btn =>
+      btn.onpointerup = () => moveDir.up = moveDir.down = moveDir.left = moveDir.right = false
+    );
+
+    setInterval(() => {
+      if (!gameStarted) return;
+      let nx = player.x, ny = player.y;
+      const s = player.speed;
+      if (moveDir.up) ny -= s;
+      if (moveDir.down) ny += s;
+      if (moveDir.left) nx -= s;
+      if (moveDir.right) nx += s;
+      if (!checkCollision(nx, ny)) {
+        player.x = nx; player.y = ny;
+        updatePosition();
+      }
+    }, 50);
+
+    // 실시간 반영
     supabase.channel("realtime:players")
       .on("postgres_changes", { event: "*", schema: "public", table: "players" }, (payload) => {
         if (payload.new.name === nickname) return;
         others[payload.new.name] = payload.new;
       })
       .subscribe();
-
-    // 그리기
-    function draw() {
-      ctx.fillStyle = "#333";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // 내 차
-      ctx.fillStyle = "lime";
-      ctx.fillRect(x, y, 40, 20);
-      ctx.fillText(nickname, x, y - 5);
-
-      // 다른 차
-      for (const name in others) {
-        const p = others[name];
-        ctx.fillStyle = "red";
-        ctx.fillRect(p.x, p.y, 40, 20);
-        ctx.fillText(p.name, p.x, p.y - 5);
-      }
-      requestAnimationFrame(draw);
-    }
-
-    function startGame() {
-      draw();
-    }
-
-    // Ethereum 경고 무시
-    if (!window.ethereum) console.warn("Ethereum provider not found (ignored)");
   </script>
 </body>
 </html>
